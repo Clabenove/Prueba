@@ -356,7 +356,7 @@ if ocultar_fantasmas and n_fantasmas > 0:
 total_el = int(mask_arr.sum())
 mask_tiene_vacios = mask_arr & (s_vac_arr > 0)
 
-# --- LAS 12 PESTAÑAS EXACTAS ACORDADAS ---
+# --- LAS 12 PESTAÑAS EXACTAS ---
 tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11, tab12 = st.tabs([
     "📖 1. Cumplimiento BEP Naming",
     "🌍 2. Georreferenciación",
@@ -446,56 +446,52 @@ with tab2:
             "✅ Consistencia espacial verificada en el emplazamiento (IfcSite)."
         )
 
-# --- PESTAÑA 3 (OPTIMIZADA: BÚSQUEDA Y FILTRO POR MODELO EN INTEGRIDAD IFC) ---
+# --- PESTAÑA 3 (ORIGINAL INTACTA) ---
 with tab3:
-    st.subheader("3. Integridad IFC y Clasificación de Entidades & Filtrado por Modelo")
-    
-    # Selector de modelo para la pestaña 3
-    modelos_disp_t3 = sorted(df_original["Archivo_Origen"].dropna().unique().tolist())
-    filtro_modelo_t3 = st.multiselect("Filtrar modelos IFC en esta vista:", modelos_disp_t3, default=modelos_disp_t3, key="t3_filtro_modelo")
-    
-    mask_t3 = mask_arr & df_original["Archivo_Origen"].isin(filtro_modelo_t3).to_numpy()
-    
-    sub_t3 = df_original[["Archivo_Origen", "Clase_IFC"]].loc[mask_t3]
-    if not sub_t3.empty:
-        conteo_clases = (
-            sub_t3.groupby(["Archivo_Origen", "Clase_IFC"])
-            .size()
-            .reset_index(name="Cantidad")
-        )
-        fig_clases = px.bar(
-            conteo_clases,
-            x="Clase_IFC",
-            y="Cantidad",
-            color="Archivo_Origen",
-            barmode="group",
-            title="Distribución de Clases IFC por Modelo (Filtrado)"
-        )
-        st.plotly_chart(fig_clases, use_container_width=True)
+    st.subheader("3. Integridad IFC y Clasificación de Entidades")
+    sub_t3 = df_original[["Archivo_Origen", "Clase_IFC"]].loc[mask_arr]
+    conteo_clases = (
+        sub_t3.groupby(["Archivo_Origen", "Clase_IFC"])
+        .size()
+        .reset_index(name="Cantidad")
+    )
+    fig_clases = px.bar(
+        conteo_clases,
+        x="Clase_IFC",
+        y="Cantidad",
+        color="Archivo_Origen",
+        barmode="group",
+        title="Distribución de Clases IFC por Modelo"
+    )
+    st.plotly_chart(fig_clases, use_container_width=True)
 
-        mask_proxy = mask_t3 & (
-            df_original["Clase_IFC"].to_numpy() == "IfcBuildingElementProxy"
+    mask_proxy = mask_arr & (
+        df_original["Clase_IFC"].to_numpy() == "IfcBuildingElementProxy"
+    )
+    n_proxys = int(mask_proxy.sum())
+    st.metric("Elementos Genéricos (IfcBuildingElementProxy)", n_proxys)
+    if n_proxys > 0:
+        st.warning(
+            f"Listado de elementos genéricos detectados "
+            f"(mostrando primeros 500 de {n_proxys:,}):"
         )
-        n_proxys = int(mask_proxy.sum())
-        st.metric("Elementos Genéricos (IfcBuildingElementProxy)", n_proxys)
-        if n_proxys > 0:
-            st.warning(f"Listado completo de elementos genéricos detectados en los modelos seleccionados ({n_proxys:,}):")
-            idx_p = np.flatnonzero(mask_proxy)
-            cols_p = [
-                c for c in [
-                    "Archivo_Origen", col_id_nativo, "GlobalId", "Clase_IFC", "Nombre"
-                ] if c in df_original.columns
-            ]
-            st.dataframe(df_original[cols_p].iloc[idx_p], use_container_width=True)
-    else:
-        st.info("Selecciona al menos un modelo en el filtro superior.")
+        idx_p = np.flatnonzero(mask_proxy)[:500]
+        cols_p = [
+            c for c in [
+                "Archivo_Origen", col_id_nativo, "GlobalId", "Clase_IFC", "Nombre"
+            ] if c in df_original.columns
+        ]
+        st.dataframe(
+            df_original[cols_p].iloc[idx_p],
+            use_container_width=True
+        )
 
-# --- PESTAÑA 4 (OPTIMIZADA: TODOS LOS ELEMENTOS, SIN LÍMITE Y FILTRADO POR MODELO/PARÁMETRO) ---
+# --- PESTAÑA 4 (OPTIMIZADA: SIN LÍMITE DE 1000 Y FILTRADO TOTAL POR MODELO/PARÁMETRO) ---
 with tab4:
     st.subheader("4. Calidad de Formato (Estricto APV vs BEP) & Panel de Control Total")
     st.markdown(
         "El comodín **`-`** está permitido por el BEP y no genera error. "
-        "A continuación se analizan **todos** los elementos sin límite para auditar unidades, estados, espacios en blanco y textos inválidos."
+        "Se analizan **todos** los elementos sin límite para auditar unidades, estados, espacios en blanco y textos inválidos."
     )
     
     @st.cache_data
@@ -825,32 +821,56 @@ with tab9:
     )
     st.dataframe(df_informe_grupos, use_container_width=True)
 
-# --- PESTAÑA 10 ---
+# --- PESTAÑA 10 (OPTIMIZADA: BUSCADOR POR COPIAR Y PEGAR GLOBALID / ID) ---
 with tab10:
-    st.subheader("🔍 10. Ficha Detallada por Elemento (Inspector BIM)")
-    st.markdown("Selecciona un elemento por su **GlobalId** para consultar todos sus atributos y parámetros APV al detalle.")
+    st.subheader("🔍 10. Ficha Detallada por Elemento (Inspector BIM & Buscador Pro)")
+    st.markdown(
+        "💡 **Pestaña de Investigación:** Copia y pega aquí el `GlobalId` o el `ID_Elemento` que hayas encontrado en la Pestaña 4 "
+        "para inspeccionar al instante sus atributos y descubrir exactamente qué parámetros te están fallando."
+    )
     
-    ids_disponibles = df_original.loc[mask_arr, "GlobalId"].dropna().unique()
-    if len(ids_disponibles) > 0:
-        id_seleccionado = st.selectbox("Selecciona un GlobalId:", ids_disponibles, key="select_ficha_globalid")
-        elem_info = df_original.loc[df_original["GlobalId"] == id_seleccionado].iloc[0]
+    # Campo de texto libre para buscar copiando y pegando el GUID o ID
+    busqueda_id = st.text_input("🔍 Copia y pega el GlobalId o ID_Elemento del objeto a investigar:", placeholder="Ej: 3H0KjjMnv619yNSGbFXGIK")
+    
+    if busqueda_id.strip():
+        # Buscar el elemento en todo el dataframe consolidado (coexacta o parcial)
+        mask_busqueda = (
+            df_original["GlobalId"].astype(str).str.contains(busqueda_id.strip(), case=False, na=False) |
+            df_original[col_id_nativo].astype(str).str.contains(busqueda_id.strip(), case=False, na=False)
+        )
+        resultados_busqueda = df_original.loc[mask_busqueda]
         
-        with st.expander(f"📋 Ficha Detallada del Elemento: {id_seleccionado}", expanded=True):
-            col_f1, col_f2 = st.columns(2)
-            with col_f1:
-                st.metric("Clase IFC", elem_info.get("Clase_IFC", "N/A"))
-                st.metric("Archivo Origen", elem_info.get("Archivo_Origen", "N/A"))
-                st.text(f"ID Nativo (Tag): {elem_info.get(col_id_nativo, 'N/A')}")
-            with col_f2:
-                n_vacios_elem = sum(1 for p in params_auditar if p in elem_info and (pd.isna(elem_info[p]) or str(elem_info[p]).strip() in VACIOS_EXACTOS))
-                st.metric("Parámetros APV Vacíos en este objeto", n_vacios_elem, delta_color="inverse")
+        if not resultados_busqueda.empty:
+            st.success(f"¡Se encontró el elemento con éxito! ({len(resultados_busqueda)} coincidencia(s))")
+            elem_info = resultados_busqueda.iloc[0]
+            
+            with st.expander(f"📋 Ficha Detallada del Elemento: {elem_info.get('GlobalId', 'N/A')}", expanded=True):
+                col_f1, col_f2 = st.columns(2)
+                with col_f1:
+                    st.metric("Clase IFC", elem_info.get("Clase_IFC", "N/A"))
+                    st.metric("Archivo Origen", elem_info.get("Archivo_Origen", "N/A"))
+                    st.text(f"ID Nativo (Tag): {elem_info.get(col_id_nativo, 'N/A')}")
+                with col_f2:
+                    n_vacios_elem = sum(1 for p in params_auditar if p in elem_info and (pd.isna(elem_info[p]) or str(elem_info[p]).strip() in VACIOS_EXACTOS))
+                    st.metric("Parámetros APV Vacíos en este objeto", n_vacios_elem, delta_color="inverse")
+                    
+                st.markdown("##### 📊 Todos los Parámetros APV y su Estado Actual:")
+                params_presentes = {p: elem_info[p] for p in params_auditar if p in elem_info}
+                df_ficha = pd.DataFrame(list(params_presentes.items()), columns=["Parámetro BEP", "Valor Actual"])
                 
-            st.markdown("##### 📊 Todos los Parámetros APV Rellenos:")
-            params_presentes = {p: elem_info[p] for p in params_auditar if p in elem_info}
-            df_ficha = pd.DataFrame(list(params_presentes.items()), columns=["Parámetro BEP", "Valor Actual"])
-            st.dataframe(df_ficha, use_container_width=True, hide_index=True)
+                # Función para destacar visualmente los vacíos o nulos en la tabla de la ficha
+                def resaltar_vacios_ficha(val):
+                    if pd.isna(val) or str(val).strip() in VACIOS_EXACTOS:
+                        return "background-color: #f8d7da; color: #721c24; font-weight: bold;"
+                    elif str(val).strip() == "-":
+                        return "background-color: #fff3cd; color: #856404;"
+                    return "background-color: #d4edda; color: #155724;"
+
+                st.dataframe(df_ficha.style.map(resalta_vacios_ficha if 'resalta_vacios_ficha' in locals() else resaltar_vacios_ficha, subset=["Valor Actual"]), use_container_width=True, hide_index=True)
+        else:
+            st.warning("⚠️ No se encontró ningún elemento que coincida con ese identificador. Verifica que lo hayas copiado bien desde la Pestaña 4.")
     else:
-        st.info("No hay elementos disponibles con los filtros actuales.")
+        st.info("👈 Ingresa o pega un identificador arriba para comenzar tu investigación.")
 
 # --- PESTAÑA 11 ---
 with tab11:
