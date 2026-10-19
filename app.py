@@ -5,6 +5,7 @@ import re
 import gc
 
 import time
+import hashlib
 import unicodedata
 
 from datetime import datetime
@@ -124,6 +125,8 @@ st.markdown("""
 
 
 st.title("📋 Dashboard Integral de Auditoría BIM - APV")
+
+st.info("**Alcance de auditoría:** se evalúan únicamente propiedades APV encontradas en el Parquet consolidado (datos exportados). Los campos que no se exportaron no cuentan como vacíos. El BCF sirve para registrar/comunicar incidencias; la comprobación de valores se hace sobre las propiedades exportadas, no sobre el BCF por sí solo.")
 
 
 
@@ -348,10 +351,20 @@ def es_valor_vacio(valor):
 
 
 def mascara_vacio_rapida(df_ref, col_name):
-    """Devuelve vacíos solo si el parámetro existe; un nombre no localizado no es un vacío."""
+    """Devuelve la máscara de vacíos y reutiliza máscaras ya calculadas para df_original."""
     if col_name not in df_ref.columns:
         # Evita convertir un campo ausente en cientos de miles de falsas alertas.
         return np.zeros(len(df_ref), dtype=bool)
+
+    # El motor guarda las máscaras de los campos APV de df_original. Como las 17
+    # pestañas se ejecutan en cada render de Streamlit, reutilizarlas evita volver
+    # a normalizar cientos de miles de celdas en cada módulo.
+    if globals().get("df_original") is df_ref:
+        cache_masks = globals().get("mascaras_vacias_apv", {})
+        mascara = cache_masks.get(col_name)
+        if mascara is not None:
+            return mascara
+
     return mascara_vacio_serie(df_ref[col_name])
 
 
@@ -373,6 +386,10 @@ def coalescer_series(series_list):
     """Une columnas equivalentes usando el primer valor real disponible por fila."""
     if not series_list:
         return pd.Series(dtype="object")
+    # No hacer una copia de 235k filas si solo hay una columna en el grupo.
+    # Es el caso habitual al normalizar un Parquet que contiene alguna etiqueta duplicada.
+    if len(series_list) == 1:
+        return series_list[0]
     base = series_list[0].copy()
     for candidata in series_list[1:]:
         posiciones = np.flatnonzero(mascara_vacio_serie(base))
@@ -418,13 +435,18 @@ def resolver_parametros_apv(df):
     mapa = {}
     for parametro in PARAMETROS_APV:
         clave = normalizar_nombre_columna(parametro)
+        # Solo se considera exportado si hay una columna fuente cuyo nombre
+        # contiene el nombre normalizado completo del parámetro oficial.
+        # Se admite un prefijo externo (p. ej. nombre de Pset), pero no
+        # coincidencias parciales ni similitud difusa.
         candidatas = [
             c for c in columnas_origen
             if normalizadas[c] == clave or normalizadas[c].endswith(clave)
         ]
 
-        # Some exports keep only the property name (APV_PROYECTO) and omit
-        # the BEP numeric prefix. Use that form only when it is unambiguous.
+        # Algunos exportadores omiten el código BEP y dejan solo el nombre
+        # de propiedad (p. ej. APV_PROYECTO). Solo se acepta si ese nombre
+        # sin código es único entre los parámetros oficiales.
         clave_tail = claves_sin_codigo[parametro]
         if not candidatas and frecuencia_clave.get(clave_tail, 0) == 1:
             candidatas = [
@@ -435,7 +457,13 @@ def resolver_parametros_apv(df):
         if not candidatas:
             continue
         candidatas.sort(key=lambda c: (normalizadas[c] != clave, len(normalizadas[c]), str(c)))
-        df[parametro] = coalescer_series([df[c] for c in candidatas])
+        # Evita copiar 235k filas si el parámetro ya está en su columna exacta
+        # o si solo existe una columna fuente candidata.
+        if len(candidatas) == 1:
+            if candidatas[0] != parametro:
+                df[parametro] = df[candidatas[0]]
+        else:
+            df[parametro] = coalescer_series([df[c] for c in candidatas])
         mapa[parametro] = candidatas
     return df, mapa
 
@@ -634,6 +662,183 @@ def generar_xml_navisworks(
 
 
 
+def generar_ifc_matriz_auditoria(df_matriz, fecha_emision):
+    """Genera un IFC4 de informe, con una caja esquemática por modelo y sus métricas como propiedades.
+
+    IMPORTANTE: la geometría de las cajas es solo representativa del registro de auditoría;
+    no reproduce la geometría original de los modelos IFC auditados.
+    """
+    try:
+        import tempfile
+        import ifcopenshell.api
+    except Exception as exc:
+        raise RuntimeError(
+            "No se pudo cargar IfcOpenShell. Comprueba que 'ifcopenshell' esté en requirements.txt "
+            "y que Streamlit Cloud haya terminado de instalar las dependencias."
+        ) from exc
+
+    if df_matriz is None or df_matriz.empty:
+        raise ValueError("No hay modelos en la matriz para exportar a IFC.")
+
+    run = ifcopenshell.api.run
+    model = run("project.create_file", version="IFC4")
+    proyecto = run(
+        "root.create_entity", model,
+        ifc_class="IfcProject",
+        name="APV - Informe de Auditoría BIM y Cumplimiento BEP"
+    )
+    unidades = run("unit.assign_unit", model)
+    contexto_modelo = run("context.add_context", model, context_type="Model")
+    contexto_cuerpo = run(
+        "context.add_context", model,
+        context_type="Model",
+        context_identifier="Body",
+        target_view="MODEL_VIEW",
+        parent=contexto_modelo
+    )
+    proyecto.RepresentationContexts = [contexto_modelo]
+    if unidades is not None:
+        proyecto.UnitsInContext = unidades
+
+    site = run("root.create_entity", model, ifc_class="IfcSite", name="APV - Auditoría")
+    edificio = run("root.create_entity", model, ifc_class="IfcBuilding", name="Informe de Calidad IFC")
+    planta = run("root.create_entity", model, ifc_class="IfcBuildingStorey", name="Registros de Modelos")
+    run("aggregate.assign_object", model, products=[site], relating_object=proyecto)
+    run("aggregate.assign_object", model, products=[edificio], relating_object=site)
+    run("aggregate.assign_object", model, products=[planta], relating_object=edificio)
+
+    def punto3(coords):
+        return model.create_entity("IfcCartesianPoint", Coordinates=tuple(float(v) for v in coords))
+
+    eje_z = model.create_entity("IfcDirection", DirectionRatios=(0.0, 0.0, 1.0))
+    eje_x = model.create_entity("IfcDirection", DirectionRatios=(1.0, 0.0, 0.0))
+
+    def axis3(coords):
+        return model.create_entity(
+            "IfcAxis2Placement3D",
+            Location=punto3(coords),
+            Axis=eje_z,
+            RefDirection=eje_x
+        )
+
+    def colocacion(parent, coords):
+        return model.create_entity(
+            "IfcLocalPlacement",
+            PlacementRelTo=parent,
+            RelativePlacement=axis3(coords)
+        )
+
+    site.ObjectPlacement = colocacion(None, (0.0, 0.0, 0.0))
+    edificio.ObjectPlacement = colocacion(site.ObjectPlacement, (0.0, 0.0, 0.0))
+    planta.ObjectPlacement = colocacion(edificio.ObjectPlacement, (0.0, 0.0, 0.0))
+
+    # Caja sencilla por modelo: permite seleccionar el registro en Navisworks y consultar sus propiedades.
+    perfil = model.create_entity(
+        "IfcRectangleProfileDef",
+        ProfileType="AREA",
+        ProfileName="Caja esquemática de registro de auditoría",
+        XDim=1500.0,
+        YDim=1500.0
+    )
+    proxies = []
+
+    def valor_ifc(valor):
+        if valor is None:
+            return None
+        try:
+            if pd.isna(valor):
+                return None
+        except (TypeError, ValueError):
+            pass
+        if isinstance(valor, np.generic):
+            valor = valor.item()
+        if isinstance(valor, float) and not np.isfinite(valor):
+            return None
+        if isinstance(valor, (str, int, float, bool)):
+            texto = str(valor).strip() if isinstance(valor, str) else None
+            if isinstance(valor, str) and texto.lower() in {"", "nan", "none", "<na>", "null"}:
+                return None
+            return valor[:1500] if isinstance(valor, str) else valor
+        return str(valor)[:1500]
+
+    def nombre_propiedad(nombre):
+        limpio = unicodedata.normalize("NFKD", str(nombre)).encode("ascii", "ignore").decode("ascii")
+        limpio = re.sub(r"[^A-Za-z0-9_]+", "_", limpio).strip("_")
+        if not limpio:
+            limpio = "Propiedad"
+        if limpio[0].isdigit():
+            limpio = "P_" + limpio
+        return limpio[:80]
+
+    for indice, (_, fila) in enumerate(df_matriz.reset_index(drop=True).iterrows()):
+        archivo = str(fila.get("Archivo_Origen", f"Modelo_{indice + 1}"))
+        proxy = run(
+            "root.create_entity", model,
+            ifc_class="IfcBuildingElementProxy",
+            name=archivo
+        )
+        proxy.Description = "Registro esquemático de calidad; no representa la geometría original del modelo."
+        proxy.ObjectType = "Registro de auditoría APV"
+        proxy.Tag = f"APV_AUDIT_{indice + 1:04d}"
+        # Orden en cuadrícula para que los registros sean visibles y seleccionables en Navisworks.
+        # El proyecto usa unidades de longitud IFC en milímetros por defecto.
+        x = float((indice % 10) * 3000)
+        y = float((indice // 10) * 3000)
+        proxy.ObjectPlacement = colocacion(planta.ObjectPlacement, (x, y, 0.0))
+
+        posicion_solido = axis3((0.0, 0.0, 0.0))
+        solido = model.create_entity(
+            "IfcExtrudedAreaSolid",
+            SweptArea=perfil,
+            Position=posicion_solido,
+            ExtrudedDirection=eje_z,
+            Depth=500.0
+        )
+        representacion = model.create_entity(
+            "IfcShapeRepresentation",
+            ContextOfItems=contexto_cuerpo,
+            RepresentationIdentifier="Body",
+            RepresentationType="SweptSolid",
+            Items=[solido]
+        )
+        proxy.Representation = model.create_entity(
+            "IfcProductDefinitionShape",
+            Name=None,
+            Description=None,
+            Representations=[representacion]
+        )
+
+        propiedades = {}
+        for columna, valor in fila.items():
+            v = valor_ifc(valor)
+            if v is None:
+                continue
+            clave = nombre_propiedad(columna)
+            if clave not in propiedades:
+                propiedades[clave] = v
+        propiedades["Fecha_Emision_Informe"] = str(fecha_emision)
+        propiedades["Tipo_Archivo"] = "IFC4 - Informe de auditoría, no modelo de diseño"
+        propiedades["Nota_Geometria"] = "Caja esquemática del registro; no es la geometría original del modelo IFC."
+
+        pset = run(
+            "pset.add_pset", model,
+            product=proxy,
+            name="APV_AuditoriaCalidadModelo"
+        )
+        run("pset.edit_pset", model, pset=pset, properties=propiedades)
+        proxies.append(proxy)
+
+    if proxies:
+        run("spatial.assign_container", model, relating_structure=planta, products=proxies)
+
+    # Volvemos bytes el IFC generado sin dejar ficheros temporales en el servidor.
+    with tempfile.TemporaryDirectory() as carpeta_tmp:
+        ruta_ifc = os.path.join(carpeta_tmp, "Matriz_Ejecutiva_Calidad_Modelos_APV.ifc")
+        model.write(ruta_ifc)
+        with open(ruta_ifc, "rb") as archivo_ifc:
+            return archivo_ifc.read()
+
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 RUTA_PARQUET = os.path.join(BASE_DIR, "resumen_ifc_consolidado.parquet")
@@ -660,8 +865,14 @@ def inicializar_motor_apv(ruta, tamano_archivo, mtime_ns):
     t0 = time.perf_counter()
     print("[DIAG 1] Leyendo archivo Parquet...", flush=True)
     df_raw = pd.read_parquet(ruta, engine="pyarrow")
+    # Algunos Parquet exportados pueden contener etiquetas repetidas (por ejemplo,
+    # dos columnas GlobalId). Se fusionan por fila antes del mapeo APV.
     df_raw = coalescer_columnas_duplicadas(df_raw)
     df_raw, mapa_parametros = resolver_parametros_apv(df_raw)
+    # Segunda barrera defensiva: las fases siguientes deben trabajar con nombres únicos.
+    df_raw = coalescer_columnas_duplicadas(df_raw)
+    if df_raw.columns.duplicated().any():
+        raise ValueError("No se pudieron normalizar los nombres duplicados de columnas del Parquet.")
 
     if "Archivo_Origen" not in df_raw.columns:
         raise ValueError("El Parquet no contiene la columna obligatoria 'Archivo_Origen'.")
@@ -680,6 +891,14 @@ def inicializar_motor_apv(ruta, tamano_archivo, mtime_ns):
     parametros_con_dato_por_archivo = {a: set() for a in archivos_unicos}
     celdas_con_dato_por_archivo = {a: 0 for a in archivos_unicos}
     filas_con_dato_parametro = {}
+    # Caché por columna para no recalcular las mismas máscaras en el segundo
+    # recorrido APV ni en las 17 pestañas posteriores.
+    mascaras_vacias_apv = {}
+
+    # Codificación numérica de los nombres de archivo: evita ejecutar value_counts
+    # y filtrar cadenas de Archivo_Origen una vez por parámetro.
+    codigos_archivo, etiquetas_archivo = pd.factorize(s_arch, sort=False)
+    mascara_archivo_valido = codigos_archivo >= 0
 
     pres_base = np.zeros(n_filas, dtype=np.uint16)
     vac_base = np.zeros(n_filas, dtype=np.uint16)
@@ -689,19 +908,25 @@ def inicializar_motor_apv(ruta, tamano_archivo, mtime_ns):
     # Los parámetros ausentes de la exportación no participan en el cómputo de vacíos.
     for col in params_no_geo_localizados + params_geo_localizados:
         v = mascara_vacio_rapida(df_raw, col)
-        filas_con_dato_parametro[col] = int((~v).sum())
+        mascaras_vacias_apv[col] = v
+        tiene_valor = ~v
+        filas_con_dato_parametro[col] = int(tiene_valor.sum())
         if col in params_no_geo_localizados:
             vac_base += v.astype(np.uint16)
-            pres_base += (~v).astype(np.uint16)
+            pres_base += tiene_valor.astype(np.uint16)
         else:
             vac_geo += v.astype(np.uint16)
-            pres_geo += (~v).astype(np.uint16)
-        if not v.all():
-            archivos_con_valor = s_arch.loc[~v].dropna().value_counts()
-            for archivo, cantidad in archivos_con_valor.items():
-                if archivo in parametros_con_dato_por_archivo:
-                    parametros_con_dato_por_archivo[archivo].add(col)
-                    celdas_con_dato_por_archivo[archivo] += int(cantidad)
+            pres_geo += tiene_valor.astype(np.uint16)
+
+        if tiene_valor.any():
+            codigos_con_valor = codigos_archivo[tiene_valor & mascara_archivo_valido]
+            conteos = np.bincount(codigos_con_valor, minlength=len(etiquetas_archivo))
+            for i_arch, cantidad in enumerate(conteos):
+                if cantidad:
+                    archivo = etiquetas_archivo[i_arch]
+                    if archivo in parametros_con_dato_por_archivo:
+                        parametros_con_dato_por_archivo[archivo].add(col)
+                        celdas_con_dato_por_archivo[archivo] += int(cantidad)
 
     pres_all = pres_base + pres_geo
     vac_all = vac_base + vac_geo
@@ -711,9 +936,15 @@ def inicializar_motor_apv(ruta, tamano_archivo, mtime_ns):
     grupos_por_arch = {a: set() for a in archivos_unicos}
     for c in cols_apv_en_df:
         prefijo = str(c).split("_")[0] if "_" in str(c) else ""
-        v = mascara_vacio_rapida(df_raw, c)
-        if not v.all():
-            for archivo in s_arch.loc[~v].dropna().unique():
+        v = mascaras_vacias_apv.get(c)
+        if v is None:
+            v = mascara_vacio_rapida(df_raw, c)
+            mascaras_vacias_apv[c] = v
+        tiene_valor = ~v
+        if tiene_valor.any():
+            codigos_con_valor = np.unique(codigos_archivo[tiene_valor & mascara_archivo_valido])
+            for i_arch in codigos_con_valor:
+                archivo = etiquetas_archivo[int(i_arch)]
                 if archivo in grupos_por_arch:
                     grupos_por_arch[archivo].add(prefijo)
 
@@ -771,7 +1002,7 @@ def inicializar_motor_apv(ruta, tamano_archivo, mtime_ns):
         df_raw, archivos_unicos, df_grupos,
         pres_base, vac_base, pres_all, vac_all,
         mapa_parametros, df_mapa_parametros, df_diagnostico_modelos,
-        parametros_con_dato_por_archivo
+        parametros_con_dato_por_archivo, mascaras_vacias_apv
     )
 
 
@@ -780,7 +1011,7 @@ _parquet_stat = os.stat(RUTA_PARQUET)
     df_original, archivos_disp, df_informe_grupos,
     pres_base_arr, vac_base_arr, pres_all_arr, vac_all_arr,
     mapa_parametros_apv, df_mapa_parametros_apv, df_diagnostico_modelos_apv,
-    parametros_con_dato_por_archivo_apv
+    parametros_con_dato_por_archivo_apv, mascaras_vacias_apv
 ) = inicializar_motor_apv(RUTA_PARQUET, _parquet_stat.st_size, _parquet_stat.st_mtime_ns)
 
 PARAMETROS_LOCALIZADOS = [p for p in PARAMETROS_APV if p in mapa_parametros_apv]
@@ -790,8 +1021,8 @@ PARAMS_GEO_LOCALIZADOS = [p for p in PARAMS_GEO if p in mapa_parametros_apv]
 
 # Diagnóstico visible: evita confundir un campo no exportado con un parámetro vacío.
 with st.expander(
-    f"🔎 Diagnóstico de lectura APV: {len(PARAMETROS_LOCALIZADOS)}/{len(PARAMETROS_APV)} parámetros localizados",
-    expanded=bool(PARAMETROS_NO_LOCALIZADOS)
+    f"🔎 Diagnóstico de exportación: {len(PARAMETROS_LOCALIZADOS)} parámetros encontrados en el Parquet",
+    expanded=False
 ):
     st.markdown(
         "El dashboard solo calcula incumplimientos con parámetros que ha podido localizar "
@@ -799,20 +1030,32 @@ with st.expander(
         "no se cuentan como celdas vacías. Si un valor se ve en Navisworks pero no aparece "
         "en esta tabla, hay que revisar la exportación/consolidación de la base."
     )
-    st.dataframe(df_mapa_parametros_apv, use_container_width=True, hide_index=True)
-    if PARAMETROS_NO_LOCALIZADOS:
-        st.warning(
-            f"Hay {len(PARAMETROS_NO_LOCALIZADOS)} parámetros oficiales que no se pudieron "
-            "encontrar por nombre en el Parquet. No se evaluarán como vacíos para evitar falsas alertas."
+    st.dataframe(
+        df_mapa_parametros_apv[df_mapa_parametros_apv["Estado de lectura"] == "✅ Localizado"],
+        width="stretch", hide_index=True
+    )
+    st.success(
+        "La auditoría solo puntúa parámetros localizados en las columnas fuente del Parquet. "
+        "Los parámetros no exportados no se suman al denominador ni se marcan como vacíos."
+    )
+    mostrar_no_exportados = st.checkbox(
+        "Mostrar también parámetros oficiales que NO se encontraron en la exportación (solo diagnóstico)",
+        value=False,
+        key="mostrar_parametros_no_exportados"
+    )
+    if mostrar_no_exportados and PARAMETROS_NO_LOCALIZADOS:
+        st.dataframe(
+            df_mapa_parametros_apv[df_mapa_parametros_apv["Estado de lectura"] != "✅ Localizado"],
+            width="stretch", hide_index=True
         )
     st.markdown("#### Diagnóstico por modelo IFC")
-    st.dataframe(df_diagnostico_modelos_apv, use_container_width=True, hide_index=True)
+    st.dataframe(df_diagnostico_modelos_apv, width="stretch", hide_index=True)
     m_codrag_diag = df_diagnostico_modelos_apv["Archivo IFC"].astype(str).str.contains(
         "CoDrag2VLC", case=False, regex=False, na=False
     )
     if m_codrag_diag.any():
         st.markdown("#### Revisión específica de CoDrag2VLC")
-        st.dataframe(df_diagnostico_modelos_apv.loc[m_codrag_diag], use_container_width=True, hide_index=True)
+        st.dataframe(df_diagnostico_modelos_apv.loc[m_codrag_diag], width="stretch", hide_index=True)
         for archivo_codrag in df_diagnostico_modelos_apv.loc[m_codrag_diag, "Archivo IFC"].astype(str):
             params_con_dato_codrag = sorted(parametros_con_dato_por_archivo_apv.get(archivo_codrag, set()))
             params_sin_dato_codrag = sorted(set(mapa_parametros_apv) - set(params_con_dato_codrag))
@@ -848,7 +1091,10 @@ st.sidebar.header("⚙ Filtros de Auditoría")
 incluir_geo = st.sidebar.checkbox("Incluir Psets 09 (Geotecnia)", value=False)
 
 params_auditar = PARAMETROS_LOCALIZADOS if incluir_geo else PARAMS_NO_GEO_LOCALIZADOS
-st.sidebar.caption(f"Parámetros APV utilizables en esta auditoría: {len(params_auditar)} · No localizados en el Parquet: {len([p for p in (PARAMETROS_APV if incluir_geo else PARAMS_NO_GEO) if p not in params_auditar])}")
+st.sidebar.caption(
+    f"Alcance: {len(params_auditar)} parámetros realmente encontrados en la exportación. "
+    "Los parámetros que no se exportaron quedan fuera del cálculo de cumplimiento."
+)
 
 
 
@@ -1051,44 +1297,30 @@ else:
 
 
 
-# --- LAS 14 PESTAÑAS ---
+# --- 17 PESTAÑAS: se conservan las 14 originales y se añaden 3 módulos de control ---
 
 (
-
     tab1, tab2, tab3, tab4, tab5, tab6, tab7,
-
-    tab8, tab9, tab10, tab11, tab12, tab13, tab14
-
+    tab8, tab9, tab10, tab11, tab12, tab13, tab14,
+    tab15, tab16, tab17
 ) = st.tabs([
-
     "📖 1. Cumplimiento BEP Naming",
-
     "🌍 2. Georreferenciación",
-
     "🧱 3. Integridad IFC",
-
     "✍️ 4. Calidad de Formato",
-
     "🕳️ 5. Auditoría de Vacíos",
-
     "🎯 6. Navisworks Manage",
-
     "❤️ 7. Salud del Proyecto",
-
     "🚨 8. Alertas IFCs Vacíos",
-
     "📐 9. Grupos de parámetros",
-
     "🔍 10. Ficha por Elemento",
-
     "💬 11. Asistente IA",
-
     "📄 12. Resumen Ejecutivo & PDF",
-
     "📈 13. Control Avance Mensual",
-
-    "🏗️ 14. Coherencia 4D/5D/6D"
-
+    "🏗️ 14. Coherencia 4D/5D/6D",
+    "🧬 15. Diagnóstico Extracción",
+    "🔗 16. Duplicados e IDs",
+    "🧭 17. Cobertura por Bloque"
 ])
 
 
@@ -1159,7 +1391,7 @@ with tab1:
 
     df_naming_t1 = pd.DataFrame(res_naming)
 
-    st.dataframe(df_naming_t1, use_container_width=True)
+    st.dataframe(df_naming_t1, width="stretch")
 
 
 
@@ -1215,7 +1447,7 @@ with tab2:
 
     df_geo = pd.DataFrame(res_geo)
 
-    st.dataframe(df_geo, use_container_width=True)
+    st.dataframe(df_geo, width="stretch")
 
     if len(df_geo) > 1 and (
 
@@ -1277,7 +1509,7 @@ with tab3:
 
     )
 
-    st.plotly_chart(fig_clases, use_container_width=True)
+    st.plotly_chart(fig_clases, width="stretch")
 
 
 
@@ -1421,7 +1653,7 @@ with tab3:
 
         st.info(f"Mostrando **{len(df_t3_view):,}** de **{n_t3_match:,}** elementos que coinciden con tu filtro.")
 
-        st.dataframe(df_t3_view, use_container_width=True, height=450)
+        st.dataframe(df_t3_view, width="stretch", height=450)
 
 
 
@@ -1696,7 +1928,7 @@ with tab4:
 
         st.info(f"Mostrando **{len(df_f4_show):,}** de **{len(df_f4_filtrado):,}** infracciones filtradas.")
 
-        st.dataframe(df_f4_show, use_container_width=True, height=480)
+        st.dataframe(df_f4_show, width="stretch", height=480)
 
 
 
@@ -1819,7 +2051,7 @@ with tab5:
 
         df_res_vacios.style.map(colorear_estado, subset=["Estado Auditoría"]),
 
-        use_container_width=True
+        width="stretch"
 
     )
 
@@ -2031,7 +2263,7 @@ with tab5:
                 lambda r: ", ".join(r.index[r.to_numpy(dtype=bool)]), axis=1
             )
 
-            st.dataframe(df_inc_view, use_container_width=True, height=500)
+            st.dataframe(df_inc_view, width="stretch", height=500)
 
 
 
@@ -2053,7 +2285,7 @@ with tab5:
 
                     key="dl_v5_pag",
 
-                    use_container_width=True
+                    width="stretch"
 
                 )
 
@@ -2077,7 +2309,7 @@ with tab5:
 
                     key="dl_v5_all",
 
-                    use_container_width=True
+                    width="stretch"
 
                 )
 
@@ -2231,7 +2463,7 @@ with tab6:
 
                     df_original[cols_d].iloc[idx_d],
 
-                    use_container_width=True
+                    width="stretch"
 
                 )
 
@@ -2283,7 +2515,7 @@ with tab7:
 
         )
 
-        st.plotly_chart(fig_peso, use_container_width=True)
+        st.plotly_chart(fig_peso, width="stretch")
 
     else:
 
@@ -2344,7 +2576,7 @@ with tab8:
 
         })
 
-    st.dataframe(pd.DataFrame(resumen_modelos_alt), use_container_width=True)
+    st.dataframe(pd.DataFrame(resumen_modelos_alt), width="stretch")
 
 
 
@@ -2364,7 +2596,7 @@ with tab9:
 
     )
 
-    st.dataframe(df_informe_grupos, use_container_width=True)
+    st.dataframe(df_informe_grupos, width="stretch")
 
 
 
@@ -2628,7 +2860,7 @@ with tab10:
 
                 df_ficha.style.map(estilo_fila_ficha, subset=["Estado"]),
 
-                use_container_width=True,
+                width="stretch",
 
                 hide_index=True,
 
@@ -2654,6 +2886,10 @@ with tab11:
 
         "estado de un archivo `.ifc` específico, proxies, pesos o reglas del BEP**."
 
+    )
+    st.caption(
+        "El asistente actual responde usando reglas y métricas calculadas desde esta auditoría; "
+        "no llama todavía a un modelo generativo externo ni requiere una API key."
     )
 
 
@@ -2997,7 +3233,7 @@ with tab12:
 
         fig_donut.update_traces(textposition="inside", textinfo="percent+label")
 
-        st.plotly_chart(fig_donut, use_container_width=True)
+        st.plotly_chart(fig_donut, width="stretch")
 
 
 
@@ -3025,7 +3261,7 @@ with tab12:
 
         fig_rank.update_layout(barmode="stack", xaxis_title="% de Parámetros Oficiales APV", yaxis_title="Modelo IFC")
 
-        st.plotly_chart(fig_rank, use_container_width=True)
+        st.plotly_chart(fig_rank, width="stretch")
 
 
 
@@ -3071,7 +3307,7 @@ with tab12:
 
         )
 
-        st.plotly_chart(fig_bloques, use_container_width=True)
+        st.plotly_chart(fig_bloques, width="stretch")
 
 
 
@@ -3103,7 +3339,7 @@ with tab12:
 
         )
 
-        st.plotly_chart(fig_pareto, use_container_width=True)
+        st.plotly_chart(fig_pareto, width="stretch")
 
 
 
@@ -3119,17 +3355,54 @@ with tab12:
 
     ]
 
+    df_matriz_exec_ordenada = grp_mod_exec[cols_matriz_exec].sort_values(
+        "% Cumplimiento BEP", ascending=False, na_position="last"
+    ).reset_index(drop=True)
     st.dataframe(
-
-        grp_mod_exec[cols_matriz_exec].sort_values("% Cumplimiento BEP", ascending=False),
-
-        use_container_width=True,
-
+        df_matriz_exec_ordenada,
+        width="stretch",
         hide_index=True
-
     )
 
-
+    # Exportación IFC del resumen: crea registros esquemáticos con propiedades de auditoría.
+    st.markdown("#### 🧱 Exportar esta matriz como IFC de auditoría")
+    st.caption(
+        "El IFC resultante contiene una caja seleccionable por cada modelo de la matriz, con sus métricas "
+        "como propiedades IFC. No contiene ni sustituye la geometría original de los modelos auditados. "
+        "Está pensado para consultar los dictámenes y propiedades del informe en Navisworks."
+    )
+    cols_ifc_matriz = [
+        c for c in cols_matriz_exec + ["% Vacíos", "Total_Celdas_Modelo", "Celdas_Cumplidas", "Suma_Celdas_Vacias"]
+        if c in grp_mod_exec.columns
+    ]
+    df_ifc_matriz = grp_mod_exec[cols_ifc_matriz].sort_values(
+        "% Cumplimiento BEP", ascending=False, na_position="last"
+    ).reset_index(drop=True)
+    huella_ifc = hashlib.sha256(df_ifc_matriz.to_csv(index=False).encode("utf-8")).hexdigest()
+    if st.session_state.get("ifc_matriz_huella") != huella_ifc:
+        st.session_state.pop("ifc_matriz_bytes", None)
+        st.session_state.pop("ifc_matriz_huella", None)
+    if st.button("⚙️ Generar IFC de la Matriz Ejecutiva", key="t12_generar_ifc"):
+        try:
+            with st.spinner("Generando IFC4 de auditoría con propiedades por modelo..."):
+                bytes_ifc = generar_ifc_matriz_auditoria(df_ifc_matriz, fecha_actual_str)
+            st.session_state["ifc_matriz_bytes"] = bytes_ifc
+            st.session_state["ifc_matriz_huella"] = huella_ifc
+            st.success(f"IFC de auditoría generado: {len(df_ifc_matriz)} registros de modelo.")
+        except Exception as exc:
+            st.error(f"No se pudo generar el IFC de auditoría: {exc}")
+    if (
+        st.session_state.get("ifc_matriz_huella") == huella_ifc
+        and st.session_state.get("ifc_matriz_bytes")
+    ):
+        st.download_button(
+            "⬇️ Descargar Matriz Ejecutiva IFC4",
+            data=st.session_state["ifc_matriz_bytes"],
+            file_name="Matriz_Ejecutiva_Calidad_Modelos_APV.ifc",
+            mime="application/x-step",
+            key="t12_descargar_ifc",
+            help="IFC4 de informe: cajas esquemáticas con las propiedades de auditoría por modelo."
+        )
 
     st.markdown("---")
 
@@ -3343,7 +3616,7 @@ with tab12:
 
             mime="text/html",
 
-            use_container_width=True
+            width="stretch"
 
         )
 
@@ -3361,7 +3634,7 @@ with tab12:
 
             mime="text/csv",
 
-            use_container_width=True
+            width="stretch"
 
         )
 
@@ -3379,7 +3652,7 @@ with tab12:
 
             mime="text/csv",
 
-            use_container_width=True
+            width="stretch"
 
         )
 
@@ -3465,7 +3738,7 @@ with tab13:
 
         )
 
-        st.plotly_chart(fig_disc, use_container_width=True)
+        st.plotly_chart(fig_disc, width="stretch")
 
     with c_rev2:
 
@@ -3481,7 +3754,7 @@ with tab13:
 
         )
 
-        st.plotly_chart(fig_revs, use_container_width=True)
+        st.plotly_chart(fig_revs, width="stretch")
 
 
 
@@ -3626,7 +3899,7 @@ with tab14:
 
     ]
 
-    st.dataframe(pd.DataFrame(res_coherencia), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(res_coherencia), width="stretch", hide_index=True)
 
 
 
@@ -3662,7 +3935,7 @@ with tab14:
 
             ]
 
-            st.dataframe(df_original[cols_14].iloc[idx_14[:5000]], use_container_width=True)
+            st.dataframe(df_original[cols_14].iloc[idx_14[:5000]], width="stretch")
 
         else:
 
@@ -3670,4 +3943,308 @@ with tab14:
 
 
 
-print("[DIAG FIN] Dashboard de 14 pestañas renderizado con éxito", flush=True)
+# --- PESTAÑA 15: DIAGNÓSTICO DE EXTRACCIÓN POR MODELO Y PARÁMETRO ---
+with tab15:
+    st.subheader("🧬 15. Diagnóstico de extracción y cobertura real en el Parquet")
+    st.markdown(
+        "Este módulo examina lo que **realmente contiene el Parquet** para un modelo concreto. "
+        "No certifica por sí solo qué muestra Navisworks: ayuda a detectar diferencias entre la vista del cliente "
+        "y los datos que recibió el dashboard. Un parámetro sin valores extraídos se marca como no verificable."
+    )
+
+    modelos_diag_disponibles = [a for a in sel_archivos if a in archivos_disp]
+    if modelos_diag_disponibles:
+        idx_diag = next(
+            (i for i, a in enumerate(modelos_diag_disponibles) if "CoDrag2VLC" in str(a)),
+            0
+        )
+        modelo_diag = st.selectbox(
+            "Selecciona el modelo IFC que deseas investigar:",
+            options=modelos_diag_disponibles,
+            index=idx_diag,
+            key="t15_modelo_diag"
+        )
+        df_modelo_diag = df_original.loc[
+            df_original["Archivo_Origen"].astype(str) == str(modelo_diag)
+        ]
+        n_filas_diag = len(df_modelo_diag)
+        mask_vacios_gid = (
+            mascara_vacio_serie(df_modelo_diag["GlobalId"])
+            if "GlobalId" in df_modelo_diag.columns
+            else np.ones(n_filas_diag, dtype=bool)
+        )
+        params_oficiales_diag = PARAMETROS_APV if incluir_geo else PARAMS_NO_GEO
+        resumen_diag_parametros = []
+        for p in params_oficiales_diag:
+            localizado = p in mapa_parametros_apv and p in df_original.columns
+            columnas_origen = mapa_parametros_apv.get(p, [])
+            if not localizado:
+                n_con_valor = None
+                n_vacios_diag = None
+                n_guion_diag = None
+                pct_cobertura_diag = None
+                muestra_diag = ""
+                estado_diag = "⚪ No localizado en el Parquet"
+            else:
+                serie_diag = df_modelo_diag[p]
+                m_vacio_diag = mascara_vacio_serie(serie_diag)
+                n_con_valor = int((~m_vacio_diag).sum())
+                n_vacios_diag = n_filas_diag - n_con_valor if n_con_valor > 0 else None
+                n_guion_diag = int(mascara_comodin_rapida(df_modelo_diag, p).sum())
+                pct_cobertura_diag = round(100 * n_con_valor / n_filas_diag, 1) if n_filas_diag else None
+                valores_muestra = (
+                    serie_diag.loc[~m_vacio_diag].astype(str).drop_duplicates().head(4).tolist()
+                )
+                muestra_diag = " | ".join(valores_muestra)
+                if n_con_valor == 0:
+                    estado_diag = "⚪ Sin ningún valor extraído en este IFC · NO VERIFICABLE"
+                elif n_vacios_diag:
+                    estado_diag = "🟡 Hay valores y también vacíos observados"
+                else:
+                    estado_diag = "🟢 Todas las filas tienen algún valor"
+            resumen_diag_parametros.append({
+                "Parámetro APV oficial": p,
+                "Estado de lectura": estado_diag,
+                "Filas del modelo": n_filas_diag,
+                "Filas con valor extraído": n_con_valor,
+                "Vacíos observados (solo si es evaluable)": n_vacios_diag,
+                "Valores '-'": n_guion_diag,
+                "% Filas con valor": pct_cobertura_diag,
+                "Columna(s) origen": " | ".join(map(str, columnas_origen)),
+                "Ejemplos de valores extraídos": muestra_diag
+            })
+        df_diag_parametros = pd.DataFrame(resumen_diag_parametros)
+        diag_texto = st.text_input(
+            "Filtrar por nombre de parámetro, estado o ejemplo de valor:",
+            key="t15_filtro_texto"
+        )
+        if diag_texto.strip():
+            q_diag = diag_texto.strip()
+            m_diag = pd.Series(False, index=df_diag_parametros.index)
+            for c in ["Parámetro APV oficial", "Estado de lectura", "Columna(s) origen", "Ejemplos de valores extraídos"]:
+                m_diag = m_diag | df_diag_parametros[c].astype(str).str.contains(q_diag, case=False, na=False)
+            df_diag_mostrar = df_diag_parametros.loc[m_diag]
+        else:
+            df_diag_mostrar = df_diag_parametros
+
+        n_param_con_dato = int((df_diag_parametros["Filas con valor extraído"].fillna(0) > 0).sum())
+        n_param_no_local = int(df_diag_parametros["Estado de lectura"].str.contains("No localizado", na=False).sum())
+        n_param_no_valor = int(df_diag_parametros["Estado de lectura"].str.contains("NO VERIFICABLE", na=False).sum())
+        k15a, k15b, k15c, k15d = st.columns(4)
+        k15a.metric("Filas del modelo en Parquet", f"{n_filas_diag:,}")
+        k15b.metric("Parámetros con valores extraídos", f"{n_param_con_dato:,}")
+        k15c.metric("Parámetros sin valores en este IFC", f"{n_param_no_valor:,}")
+        k15d.metric("Parámetros no localizados globalmente", f"{n_param_no_local:,}")
+        st.dataframe(df_diag_mostrar, width="stretch", hide_index=True, height=500)
+        st.download_button(
+            "⬇️ Descargar diagnóstico de extracción del modelo (CSV)",
+            data=df_diag_parametros.to_csv(index=False).encode("utf-8-sig"),
+            file_name=f"Diagnostico_Extraccion_{re.sub(r'[^A-Za-z0-9_-]+', '_', str(modelo_diag))}.csv",
+            mime="text/csv",
+            key="t15_descargar_csv"
+        )
+        st.caption(
+            "Interpretación: 'sin valores extraídos' no significa que el parámetro esté vacío en Navisworks; "
+            "significa que este Parquet no contiene ningún valor no vacío para ese campo en este modelo."
+        )
+    else:
+        st.info("Selecciona al menos un modelo en los filtros de la barra lateral.")
+
+
+# --- PESTAÑA 16: AUDITORÍA DE DUPLICADOS E IDENTIFICADORES ---
+with tab16:
+    st.subheader("🔗 16. Auditoría independiente de GlobalId e ID_Elemento duplicados")
+    st.markdown(
+        "Esta pestaña revisa los registros tal como están almacenados en el Parquet, "
+        "independientemente del filtro de unificación de duplicados. Los repetidos se listan para revisión; "
+        "no se eliminan automáticamente porque algunos pueden tener una explicación de origen."
+    )
+    # Barrera defensiva para archivos históricos/cachés creados con una versión previa.
+    # La fusión conserva el primer valor no vacío entre columnas con la misma etiqueta.
+    df_ids_unicas = coalescer_columnas_duplicadas(df_original)
+    df_ids_unicas = df_ids_unicas.loc[:, ~df_ids_unicas.columns.duplicated(keep="first")].copy()
+    df_ids_base = df_ids_unicas.loc[df_ids_unicas["Archivo_Origen"].isin(sel_archivos)].copy()
+    campo_id_dup = st.radio(
+        "Identificador que deseas comprobar:",
+        options=[c for c in ["GlobalId", "ID_Elemento"] if c in df_ids_base.columns],
+        horizontal=True,
+        key="t16_campo_id"
+    ) if any(c in df_ids_base.columns for c in ["GlobalId", "ID_Elemento"]) else None
+
+    if campo_id_dup:
+        m_id_invalido = df_ids_base[campo_id_dup].isna().to_numpy() | _normalizar_serie_texto(
+            df_ids_base[campo_id_dup]
+        ).isin(VALORES_VACIOS_LOWER).to_numpy()
+        n_id_sin_valor = int(m_id_invalido.sum())
+        m_id_con_valor = ~m_id_invalido
+        df_ids_con_valor = df_ids_base.loc[m_id_con_valor].copy()
+        df_ids_con_valor["_Clave_ID"] = _normalizar_serie_texto(df_ids_con_valor[campo_id_dup]).str.upper()
+        es_dup = df_ids_con_valor.duplicated(subset=["Archivo_Origen", "_Clave_ID"], keep=False)
+        df_repetidos_id = df_ids_con_valor.loc[es_dup].copy()
+        n_filas_duplicadas = len(df_repetidos_id)
+        n_valores_duplicados = int(df_repetidos_id.groupby(["Archivo_Origen", "_Clave_ID"]).ngroups) if not df_repetidos_id.empty else 0
+
+        d1, d2, d3 = st.columns(3)
+        d1.metric("Registros examinados", f"{len(df_ids_base):,}")
+        d2.metric("Registros con ID vacío", f"{n_id_sin_valor:,}")
+        d3.metric("Registros implicados en duplicados", f"{n_filas_duplicadas:,}")
+        st.caption(f"Valores identificadores repetidos por modelo: {n_valores_duplicados:,}.")
+        if not df_repetidos_id.empty:
+            # Asegurar nombres únicos también en la tabla derivada. Si el ID elegido
+            # ya es GlobalId, no añadir la columna por segunda vez.
+            df_repetidos_id = coalescer_columnas_duplicadas(df_repetidos_id)
+            df_repetidos_id = df_repetidos_id.loc[:, ~df_repetidos_id.columns.duplicated(keep="first")].copy()
+            candidatos = ["Archivo_Origen", campo_id_dup, "GlobalId", "ID_Elemento", "Clase_IFC", "Nombre"]
+            cols_dup_show = []
+            for nombre_col in candidatos:
+                if nombre_col in df_repetidos_id.columns and nombre_col not in cols_dup_show:
+                    cols_dup_show.append(nombre_col)
+            df_repetidos_mostrar = df_repetidos_id.loc[:, cols_dup_show].copy()
+            # Defensa final: sort_values falla si la lista de columnas o las etiquetas
+            # están duplicadas; esta lista se mantiene estrictamente única.
+            columnas_orden = []
+            for nombre_col in ["Archivo_Origen", campo_id_dup]:
+                if nombre_col in df_repetidos_mostrar.columns and nombre_col not in columnas_orden:
+                    columnas_orden.append(nombre_col)
+            if columnas_orden:
+                try:
+                    df_repetidos_mostrar = df_repetidos_mostrar.sort_values(by=columnas_orden)
+                except (ValueError, KeyError):
+                    # Mostrar el listado sin ordenar es preferible a bloquear toda la app.
+                    pass
+            df_repetidos_mostrar = df_repetidos_mostrar.head(10000)
+            st.dataframe(
+                df_repetidos_mostrar,
+                width="stretch",
+                hide_index=True,
+                height=450
+            )
+            st.download_button(
+                "⬇️ Descargar identificadores duplicados (CSV)",
+                data=df_repetidos_mostrar.to_csv(index=False).encode("utf-8-sig"),
+                file_name=f"Duplicados_{campo_id_dup}_APV.csv",
+                mime="text/csv",
+                key="t16_descargar_duplicados"
+            )
+        else:
+            st.success("No se detectan duplicados no vacíos para este identificador dentro de cada modelo seleccionado.")
+
+        if "GlobalId" in df_ids_base.columns:
+            df_gid_validos = df_ids_base.loc[
+                ~df_ids_base["GlobalId"].isna()
+                & ~_normalizar_serie_texto(df_ids_base["GlobalId"]).isin(VALORES_VACIOS_LOWER)
+            ]
+            gid_multi = (
+                df_gid_validos.groupby("GlobalId")["Archivo_Origen"].agg(
+                    Modelos="nunique",
+                    Archivos=lambda x: " | ".join(pd.unique(x.astype(str)))
+                ).reset_index()
+            )
+            gid_multi = gid_multi.loc[gid_multi["Modelos"] > 1]
+            st.markdown("#### GlobalId que aparecen en varios archivos IFC")
+            if not gid_multi.empty:
+                st.warning(f"Se encontraron {len(gid_multi):,} GlobalId presentes en más de un modelo. Revisa si son referencias repetidas o duplicados de entrega.")
+                st.dataframe(gid_multi, width="stretch", hide_index=True)
+            else:
+                st.success("No hay GlobalId no vacíos compartidos entre distintos modelos seleccionados.")
+    else:
+        st.info("No existe una columna GlobalId ni ID_Elemento que se pueda auditar en el Parquet.")
+
+
+# --- PESTAÑA 17: COBERTURA POR BLOQUE DEL BEP Y MODELO ---
+with tab17:
+    st.subheader("🧭 17. Matriz de cobertura APV por modelo y bloque BEP")
+    st.markdown(
+        "Compara los bloques 01–10 entre modelos. Solo evalúa un parámetro en un modelo cuando el Parquet "
+        "contiene al menos un valor para ese campo en ese modelo. Los campos sin ningún valor extraído se "
+        "cuentan aparte como **no verificables**, para no convertir un problema de extracción en una alerta del 100 %."
+    )
+    filas_cobertura_bep = []
+    for arch_cov in sel_archivos:
+        m_arch_cov = mask_arr & (df_original["Archivo_Origen"].astype(str).to_numpy() == str(arch_cov))
+        df_arch_cov = df_original.loc[m_arch_cov]
+        n_arch_cov = len(df_arch_cov)
+        if n_arch_cov == 0:
+            continue
+        for codigo_cov, nombre_bloque_cov in NOMBRES_GRUPOS_BEP.items():
+            parametros_bloque = [
+                p for p in params_auditar
+                if re.match(r"^(\d{2})", str(p))
+                and re.match(r"^(\d{2})", str(p)).group(1) == codigo_cov
+            ]
+            parametros_evaluables_bloque = [
+                p for p in parametros_bloque
+                if p in df_original.columns
+                and int((~mascara_vacio_rapida(df_arch_cov, p)).sum()) > 0
+            ]
+            valores_bloque = sum(
+                int((~mascara_vacio_rapida(df_arch_cov, p)).sum())
+                for p in parametros_evaluables_bloque
+            )
+            n_params_eval_bloque = len(parametros_evaluables_bloque)
+            n_celdas_eval_bloque = n_arch_cov * n_params_eval_bloque
+            n_celdas_vacias_bloque = n_celdas_eval_bloque - valores_bloque
+            pct_bloque = round(100 * valores_bloque / n_celdas_eval_bloque, 1) if n_celdas_eval_bloque else np.nan
+            n_no_verificables_bloque = max(0, len(parametros_bloque) - n_params_eval_bloque)
+            filas_cobertura_bep.append({
+                "Archivo IFC": arch_cov,
+                "Código Bloque": codigo_cov,
+                "Bloque BEP": nombre_bloque_cov,
+                "Elementos auditados": n_arch_cov,
+                "Parámetros oficiales del bloque": len(parametros_bloque),
+                "Parámetros evaluables en este modelo": n_params_eval_bloque,
+                "Parámetros sin valor extraído (N/V)": n_no_verificables_bloque,
+                "Celdas evaluables": n_celdas_eval_bloque,
+                "Celdas con valor (incluye '-')": valores_bloque,
+                "Vacíos observados": n_celdas_vacias_bloque if n_celdas_eval_bloque else None,
+                "% Cobertura evaluable": pct_bloque
+            })
+
+    df_cobertura_bep = pd.DataFrame(filas_cobertura_bep)
+    if not df_cobertura_bep.empty:
+        codigos_filtro = st.multiselect(
+            "Filtrar bloques BEP:",
+            options=list(NOMBRES_GRUPOS_BEP.keys()),
+            default=list(NOMBRES_GRUPOS_BEP.keys()),
+            format_func=lambda x: f"{x} · {NOMBRES_GRUPOS_BEP.get(x, x)}",
+            key="t17_bloques"
+        )
+        df_cobertura_mostrar = df_cobertura_bep.loc[df_cobertura_bep["Código Bloque"].isin(codigos_filtro)]
+        st.dataframe(
+            df_cobertura_mostrar.sort_values(["Archivo IFC", "Código Bloque"]),
+            width="stretch",
+            hide_index=True,
+            height=500
+        )
+        pivot_cov = df_cobertura_bep.pivot(
+            index="Archivo IFC", columns="Código Bloque", values="% Cobertura evaluable"
+        )
+        pivot_cov = pivot_cov.reindex(columns=[c for c in NOMBRES_GRUPOS_BEP if c in pivot_cov.columns])
+        if not pivot_cov.empty and pivot_cov.notna().any().any():
+            fig_cov = px.imshow(
+                pivot_cov,
+                aspect="auto",
+                color_continuous_scale=["#ef4444", "#f59e0b", "#10b981"],
+                zmin=0,
+                zmax=100,
+                text_auto=".1f",
+                labels={"x": "Bloque BEP", "y": "Modelo IFC", "color": "Cobertura (%)"},
+                title="Cobertura de campos evaluables por modelo y bloque (%)"
+            )
+            st.plotly_chart(fig_cov, width="stretch")
+        st.download_button(
+            "⬇️ Descargar matriz de cobertura por modelo y bloque (CSV)",
+            data=df_cobertura_bep.to_csv(index=False).encode("utf-8-sig"),
+            file_name="Cobertura_APV_Modelo_Bloque_BEP.csv",
+            mime="text/csv",
+            key="t17_descargar_cobertura"
+        )
+        st.caption(
+            "Un porcentaje alto de cobertura indica que los campos evaluables contienen valores o el comodín '-'. "
+            "No sustituye la validación de aplicabilidad por categoría IFC ni la comparación directa con Navisworks."
+        )
+    else:
+        st.info("No hay suficientes registros de modelos seleccionados para generar la matriz de cobertura.")
+
+
+print("[DIAG FIN] Dashboard de 17 pestañas renderizado con éxito", flush=True)
