@@ -16,50 +16,33 @@ st.set_page_config(
     layout="wide"
 )
 
-# Estilos CSS para mejorar el acabado visual y permitir exportación limpia a PDF con Ctrl+P
-st.markdown("""
-<style>
-@media print {
-    section[data-testid="stSidebar"],
-    header[data-testid="stHeader"],
-    div[data-testid="stToolbar"],
-    .stDownloadButton,
-    .stButton,
-    div[data-testid="stChatInput"] {
-        display: none !important;
-    }
-    .main .block-container {
-        padding-top: 0.5rem !important;
-        max-width: 100% !important;
-    }
-}
-.kpi-card {
-    background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-    border: 1px solid #334155;
-    border-radius: 10px;
-    padding: 16px;
-    text-align: center;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.2);
-}
-.kpi-title {
-    font-size: 0.85rem;
-    color: #94a3b8;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin-bottom: 6px;
-}
-.kpi-value {
-    font-size: 1.75rem;
-    font-weight: 700;
-    color: #f8fafc;
-}
-.kpi-sub {
-    font-size: 0.8rem;
-    color: #38bdf8;
-    margin-top: 4px;
-}
-</style>
-""", unsafe_allow_html=True)
+css_styles = "\n".join([
+    "<style>",
+    "@media print {",
+    "    section[data-testid='stSidebar'],",
+    "    header[data-testid='stHeader'],",
+    "    div[data-testid='stToolbar'],",
+    "    .stDownloadButton, .stButton,",
+    "    div[data-testid='stChatInput'] { display: none !important; }",
+    "    .main .block-container {",
+    "        padding-top: 0.5rem !important; max-width: 100% !important;",
+    "    }",
+    "}",
+    ".kpi-card {",
+    "    background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);",
+    "    border: 1px solid #334155; border-radius: 10px;",
+    "    padding: 16px; text-align: center;",
+    "    box-shadow: 0 4px 6px rgba(0,0,0,0.2);",
+    "}",
+    ".kpi-title {",
+    "    font-size: 0.85rem; color: #94a3b8; text-transform: uppercase;",
+    "    letter-spacing: 0.05em; margin-bottom: 6px;",
+    "}",
+    ".kpi-value { font-size: 1.75rem; font-weight: 700; color: #f8fafc; }",
+    ".kpi-sub { font-size: 0.8rem; color: #38bdf8; margin-top: 4px; }",
+    "</style>"
+])
+st.markdown(css_styles, unsafe_allow_html=True)
 
 st.title("📋 Dashboard Integral de Auditoría BIM - APV")
 
@@ -163,7 +146,6 @@ VALORES_VACIOS_LOWER = {"", "nan", "none", "<na>", "null"}
 
 
 def _normalizar_clave_param(texto):
-    """Normaliza tildes, espacios, prefijos de Pset y guiones para emparejar columnas como en Navisworks."""
     s = str(texto).strip()
     if ":" in s:
         s = s.split(":")[-1].strip()
@@ -179,7 +161,6 @@ def _normalizar_clave_param(texto):
 
 
 def mascara_vacio_rapida(df_ref, col_name):
-    """Evalúa vacíos en C sin crear copias de texto (.astype(str))."""
     if col_name not in df_ref.columns:
         return np.ones(len(df_ref), dtype=bool)
     s = df_ref[col_name]
@@ -187,7 +168,6 @@ def mascara_vacio_rapida(df_ref, col_name):
 
 
 def mascara_comodin_rapida(df_ref, col_name):
-    """Evalúa comodines '-' en C sin crear copias de texto."""
     if col_name not in df_ref.columns:
         return np.zeros(len(df_ref), dtype=bool)
     return df_ref[col_name].isin(COMODINES_EXACTOS).to_numpy()
@@ -245,16 +225,38 @@ def sugerir_nombre_bep(nombre_archivo):
         return "V_N035_OB_MOD_EST_Proyecto_01A.ifc"
     base = str(nombre_archivo)[:-4]
     partes = base.split("_")
-    puerto = partes[0] if len(partes) > 0 and partes[0].upper() in ["V", "S", "G"] else "V"
+    puerto = (
+        partes[0]
+        if len(partes) > 0 and partes[0].upper() in ["V", "S", "G"]
+        else "V"
+    )
     contrato = "N035"
     fase = "OB"
-    tipo = partes[3] if len(partes) > 3 and re.match(r"^[A-Za-z]{3}$", partes[3]) else "MOD"
-    disc = partes[4] if len(partes) > 4 and re.match(r"^[A-Za-z]{3}$", partes[4]) else "EST"
-    desc = re.sub(r"[^A-Za-z0-9\-]", "", partes[5]) if len(partes) > 5 else "Proyecto"
+    tipo = (
+        partes[3]
+        if len(partes) > 3 and re.match(r"^[A-Za-z]{3}$", partes[3])
+        else "MOD"
+    )
+    disc = (
+        partes[4]
+        if len(partes) > 4 and re.match(r"^[A-Za-z]{3}$", partes[4])
+        else "EST"
+    )
+    desc = (
+        re.sub(r"[^A-Za-z0-9\-]", "", partes[5])
+        if len(partes) > 5 else "Proyecto"
+    )
     if not desc:
         desc = "Proyecto"
-    rev = partes[6] if len(partes) > 6 and re.match(r"^\d{2}[A-Za-z]$", partes[6]) else "01A"
-    return f"{puerto.upper()}_{contrato}_{fase}_{tipo.upper()}_{disc.upper()}_{desc}_{rev.upper()}.ifc"
+    rev = (
+        partes[6]
+        if len(partes) > 6 and re.match(r"^\d{2}[A-Za-z]$", partes[6])
+        else "01A"
+    )
+    return (
+        f"{puerto.upper()}_{contrato}_{fase}_"
+        f"{tipo.upper()}_{disc.upper()}_{desc}_{rev.upper()}.ifc"
+    )
 
 
 def generar_xml_navisworks(
@@ -298,7 +300,7 @@ if not os.path.isfile(RUTA_PARQUET):
     st.stop()
 
 
-@st.cache_resource(show_spinner="Cargando, sincronizando modo Navisworks e indexando base de datos BIM...")
+@st.cache_resource(show_spinner="Cargando e indexando base de datos BIM...")
 def inicializar_motor_apv(ruta):
     t0 = time.perf_counter()
     print("[DIAG 1] Leyendo archivo Parquet...", flush=True)
@@ -306,9 +308,11 @@ def inicializar_motor_apv(ruta):
     if df_raw.columns.duplicated().any():
         df_raw = df_raw.loc[:, ~df_raw.columns.duplicated()]
 
-    # 1. Rescate automático de columnas con alias, sin tildes o sin infijo APV
     mapa_norm_oficial = {_normalizar_clave_param(p): p for p in PARAMETROS_APV}
-    mapa_sin_apv = {_normalizar_clave_param(p).replace("_APV_", "_"): p for p in PARAMETROS_APV}
+    mapa_sin_apv = {
+        _normalizar_clave_param(p).replace("_APV_", "_"): p
+        for p in PARAMETROS_APV
+    }
 
     for c in list(df_raw.columns):
         if c in PARAMETROS_APV:
@@ -335,19 +339,20 @@ def inicializar_motor_apv(ruta):
     archivos_unicos = sorted(
         df_raw["Archivo_Origen"].dropna().unique().tolist()
     )
-    arch_cat = pd.Categorical(df_raw["Archivo_Origen"], categories=archivos_unicos)
+    arch_cat = pd.Categorical(
+        df_raw["Archivo_Origen"], categories=archivos_unicos
+    )
     arch_codes = arch_cat.codes
     n_arch = max(1, len(archivos_unicos))
     valid_arch_mask = arch_codes >= 0
     arch_codes_safe = np.where(valid_arch_mask, arch_codes, 0)
 
-    # Contadores Teóricos (BEP estricto 79 / 137 parámetros)
     pres_base = np.zeros(n_filas, dtype=np.uint8)
     vac_base = np.zeros(n_filas, dtype=np.uint8)
-
-    # Contadores Modo Real Navisworks (Solo parámetros realmente exportados/visibles en Navisworks por modelo)
     vac_nw_base = np.zeros(n_filas, dtype=np.uint8)
-    matriz_presencia_mod = pd.DataFrame(False, index=archivos_unicos, columns=PARAMETROS_APV)
+    matriz_presencia_mod = pd.DataFrame(
+        False, index=archivos_unicos, columns=PARAMETROS_APV
+    )
 
     for col in PARAMS_NO_GEO:
         v = mascara_vacio_rapida(df_raw, col)
@@ -389,7 +394,6 @@ def inicializar_motor_apv(ruta):
     vac_all = vac_base + vac_geo
     vac_nw_all = vac_nw_base + vac_nw_geo
 
-    # Máximo de parámetros presentes por modelo (para detectar sub-geometrías fantasma vs objetos reales de Navisworks)
     max_pres_por_mod = np.zeros(n_arch, dtype=np.uint8)
     np.maximum.at(max_pres_por_mod, arch_codes_safe, pres_all)
     max_pres_fila_arr = max_pres_por_mod[arch_codes_safe]
@@ -407,7 +411,10 @@ def inicializar_motor_apv(ruta):
     for arch in archivos_unicos:
         es_geo = "geo" in str(arch).lower()
         g_set = grupos_por_arch[arch]
-        n_params_visibles_nw = int(matriz_presencia_mod.loc[arch].sum()) if arch in matriz_presencia_mod.index else 0
+        n_params_visibles_nw = (
+            int(matriz_presencia_mod.loc[arch].sum())
+            if arch in matriz_presencia_mod.index else 0
+        )
         info_grupos.append({
             "Archivo IFC": arch,
             "Tipo de Modelo": (
@@ -418,7 +425,8 @@ def inicializar_motor_apv(ruta):
             "Grupos Totales Detectados": len(g_set),
             "Parámetros Visibles en Navisworks": n_params_visibles_nw,
             "Grupos Específicos Detectados": (
-                ", ".join(sorted(list(g_set))) if g_set else "Ninguno (Extraer con convertidor_ifc.py optimizado)"
+                ", ".join(sorted(list(g_set))) if g_set
+                else "Ninguno (Extraer con convertidor_ifc.py optimizado)"
             )
         })
     df_grupos = pd.DataFrame(info_grupos)
@@ -454,9 +462,8 @@ modo_real_navisworks = st.sidebar.checkbox(
     "🎯 Modo Real Navisworks (Filtrar solo parámetros visibles en Navisworks)",
     value=True,
     help=(
-        "Evalúa cada modelo y elemento únicamente respecto a los parámetros APV que realmente "
-        "existen y se visualizan en Navisworks en ese modelo, eliminando los falsos negativos "
-        "de parámetros no exportados."
+        "Evalúa cada modelo y elemento únicamente respecto a los parámetros "
+        "APV que realmente existen y se visualizan en Navisworks."
     )
 )
 
@@ -464,10 +471,12 @@ incluir_geo = st.sidebar.checkbox("Incluir Psets 09 (Geotecnia)", value=False)
 params_base_lista = PARAMETROS_APV if incluir_geo else PARAMS_NO_GEO
 
 ocultar_fantasmas = st.sidebar.checkbox(
-    "Omitir sub-elementos fantasma (sin Pset APV completo en Navisworks)", value=True
+    "Omitir sub-elementos fantasma (sin Pset APV completo en Navisworks)",
+    value=True
 )
 unificar_duplicados = st.sidebar.checkbox(
-    "Eliminar/Unificar elementos duplicados (priorizando fila llena)", value=False
+    "Eliminar/Unificar elementos duplicados (priorizando fila llena)",
+    value=False
 )
 
 sel_archivos = st.sidebar.multiselect(
@@ -491,8 +500,8 @@ if len(sel_archivos) >= umbral_mes_anterior:
     )
 else:
     st.sidebar.error(
-        f"🚨 **Alerta de Regresión:** {len(sel_archivos)} modelos seleccionados "
-        f"(faltan {umbral_mes_anterior - len(sel_archivos)} respecto al mes anterior)."
+        f"🚨 **Alerta de Regresión:** {len(sel_archivos)} modelos "
+        f"(faltan {umbral_mes_anterior - len(sel_archivos)} vs mes anterior)."
     )
 
 if not sel_archivos:
@@ -506,34 +515,33 @@ else:
 
 s_pres_arr = pres_all_arr if incluir_geo else pres_base_arr
 
-# Unificación de duplicados conservando SIEMPRE la fila con MÁS parámetros llenos (como Navisworks)
 if unificar_duplicados:
     orden_completitud = np.argsort(-s_pres_arr, kind="mergesort")
-    df_temp_dup = df_original.iloc[orden_completitud][["Archivo_Origen", "GlobalId"]]
+    df_temp_dup = df_original.iloc[orden_completitud][
+        ["Archivo_Origen", "GlobalId"]
+    ]
     dup_sorted = df_temp_dup.duplicated(keep="first").to_numpy()
     dup_arr = np.zeros(len(df_original), dtype=bool)
     dup_arr[orden_completitud] = dup_sorted
     mask_arr = mask_arr & (~dup_arr)
 
-# Selección del vector de vacíos según Modo Real Navisworks vs Teórico Estricto
 if modo_real_navisworks:
     s_vac_arr = vac_nw_all_arr if incluir_geo else vac_nw_base_arr
     sub_mat_nw = matriz_presencia_nw.loc[
         matriz_presencia_nw.index.intersection(sel_archivos),
         params_base_lista
     ]
-    params_visibles_en_seleccion = sub_mat_nw.columns[sub_mat_nw.any(axis=0)].tolist()
-    params_auditar = params_visibles_en_seleccion if len(params_visibles_en_seleccion) > 0 else params_base_lista
+    params_visibles_en_sel = sub_mat_nw.columns[sub_mat_nw.any(axis=0)].tolist()
+    params_auditar = (
+        params_visibles_en_sel
+        if len(params_visibles_en_sel) > 0 else params_base_lista
+    )
 else:
     s_vac_arr = vac_all_arr if incluir_geo else vac_base_arr
     params_auditar = params_base_lista
 
 
 def mascara_vacio_efectiva(df_ref, col_name):
-    """
-    En Modo Real Navisworks, solo marca un elemento como vacío en 'col_name'
-    si 'col_name' fue realmente exportado y es visible en Navisworks para ese modelo IFC.
-    """
     v_raw = mascara_vacio_rapida(df_ref, col_name)
     if not modo_real_navisworks or col_name not in matriz_presencia_nw.columns:
         return v_raw
@@ -548,9 +556,10 @@ df_arch_pres = pd.DataFrame({
 suma_arch = df_arch_pres.groupby("arch")["pres"].sum()
 archivos_vacios = suma_arch[suma_arch == 0].index.tolist()
 
-# En Modo Real Navisworks, también filtramos sub-geometrías residuales que tienen <25% de los parámetros del modelo
 if modo_real_navisworks:
-    umbral_min_fila = np.maximum(1, (max_pres_modelo_arr * 0.25).astype(np.uint8))
+    umbral_min_fila = np.maximum(
+        1, (max_pres_modelo_arr * 0.25).astype(np.uint8)
+    )
     es_fantasma_arr = (s_pres_arr < umbral_min_fila) & (max_pres_modelo_arr > 0)
 else:
     es_fantasma_arr = (s_pres_arr == 0)
@@ -563,22 +572,22 @@ if ocultar_fantasmas and n_fantasmas > 0:
         )
         mask_arr = mask_arr & ((~es_fantasma_arr) | es_arch_vacio)
         st.sidebar.success(
-            f"🧹 Se filtraron {n_fantasmas:,} sub-elementos geométricos sin Psets completos. "
+            f"🧹 Se filtraron {n_fantasmas:,} sub-elementos sin Psets. "
             f"Auditando {int(mask_arr.sum()):,} objetos reales de Navisworks."
         )
 
 if modo_real_navisworks:
+    n_omitidos = len(params_base_lista) - len(params_auditar)
     st.sidebar.info(
-        f"🎯 **Sincronizado con Navisworks:** Auditando los **{len(params_auditar)} parámetros** "
-        f"realmente presentes en Navisworks (se omiten {len(params_base_lista) - len(params_auditar)} "
-        "parámetros no exportados a estos IFC)."
+        f"🎯 **Sincronizado con Navisworks:** Auditando los "
+        f"**{len(params_auditar)} parámetros** visibles en Navisworks "
+        f"(se omiten {n_omitidos} no exportados a estos IFC)."
     )
 
 total_el = int(mask_arr.sum())
 mask_tiene_vacios = mask_arr & (s_vac_arr > 0)
 n_inc_total = int(mask_tiene_vacios.sum())
 
-# Pre-cálculo rápido de peso total para uso transversal
 if "Peso_Archivo_MB" in df_original.columns:
     df_pesos_global = (
         df_original.loc[mask_arr, ["Archivo_Origen", "Peso_Archivo_MB"]]
@@ -589,7 +598,9 @@ if "Peso_Archivo_MB" in df_original.columns:
     ).fillna(0.0)
     peso_total = float(df_pesos_global["Peso_Archivo_MB"].sum())
 else:
-    df_pesos_global = pd.DataFrame(columns=["Archivo_Origen", "Peso_Archivo_MB"])
+    df_pesos_global = pd.DataFrame(
+        columns=["Archivo_Origen", "Peso_Archivo_MB"]
+    )
     peso_total = 0.0
 
 # --- LAS 14 PESTAÑAS ---
@@ -628,14 +639,18 @@ with tab1:
     for _, row in unicos_t1.iterrows():
         arch = row["Archivo_Origen"]
         esquema = row.get("Esquema_IFC", "No definido")
-        peso_raw = pd.to_numeric(row.get("Peso_Archivo_MB", 0.0), errors="coerce")
+        peso_raw = pd.to_numeric(
+            row.get("Peso_Archivo_MB", 0.0), errors="coerce"
+        )
         peso = 0.0 if pd.isna(peso_raw) else float(peso_raw)
         es_ifc_ok = (
             "IFC4" in str(esquema).upper()
             or "IFC2X3" in str(esquema).upper()
         )
         diag = diagnosticar_nombre_bep(arch)
-        sugerencia = sugerir_nombre_bep(arch) if "❌" in diag else "✅ Nombre Correcto"
+        sugerencia = (
+            sugerir_nombre_bep(arch) if "❌" in diag else "✅ Nombre Correcto"
+        )
         res_naming.append({
             "Archivo IFC": arch,
             "Cumple Nomenclatura BEP (y Razón Exacta)": diag,
@@ -688,7 +703,7 @@ with tab2:
             "✅ Consistencia espacial verificada en el emplazamiento (IfcSite)."
         )
 
-# --- PESTAÑA 3 (OPTIMIZADA: SIN TOPE DE 500 Y CON BUSCADOR REAL EN SERVIDOR) ---
+# --- PESTAÑA 3 ---
 with tab3:
     st.subheader("3. Integridad IFC y Clasificación de Entidades")
     sub_t3 = df_original[["Archivo_Origen", "Clase_IFC"]].loc[mask_arr]
@@ -711,10 +726,16 @@ with tab3:
         df_original["Clase_IFC"].to_numpy() == "IfcBuildingElementProxy"
     )
     n_proxys = int(mask_proxy.sum())
-    st.metric("Elementos Genéricos Totales (IfcBuildingElementProxy)", f"{n_proxys:,}")
+    st.metric(
+        "Elementos Genéricos Totales (IfcBuildingElementProxy)",
+        f"{n_proxys:,}"
+    )
 
     st.markdown("---")
-    st.markdown("#### 🔎 Buscador e Inspector de Entidades IFC / Proxies (Sobre el 100% de Elementos)")
+    st.markdown(
+        "#### 🔎 Buscador e Inspector de Entidades IFC / Proxies "
+        "(Sobre el 100% de Elementos)"
+    )
     col_t3_1, col_t3_2, col_t3_3, col_t3_4 = st.columns([2, 2, 2, 1])
 
     with col_t3_1:
@@ -726,7 +747,11 @@ with tab3:
         )
     with col_t3_2:
         clases_disp_t3 = sorted(sub_t3["Clase_IFC"].dropna().unique().tolist())
-        default_clases_t3 = ["IfcBuildingElementProxy"] if "IfcBuildingElementProxy" in clases_disp_t3 else clases_disp_t3
+        default_clases_t3 = (
+            ["IfcBuildingElementProxy"]
+            if "IfcBuildingElementProxy" in clases_disp_t3
+            else clases_disp_t3
+        )
         clase_t3 = st.multiselect(
             "Filtrar por Clase IFC:",
             options=clases_disp_t3,
@@ -756,30 +781,52 @@ with tab3:
     if buscar_t3.strip():
         q_t3 = buscar_t3.strip()
         m_txt_t3 = (
-            df_original["GlobalId"].astype(str).str.contains(q_t3, case=False, na=False).to_numpy()
-            | df_original[col_id_nativo].astype(str).str.contains(q_t3, case=False, na=False).to_numpy()
+            df_original["GlobalId"].astype(str).str.contains(
+                q_t3, case=False, na=False
+            ).to_numpy()
+            | df_original[col_id_nativo].astype(str).str.contains(
+                q_t3, case=False, na=False
+            ).to_numpy()
         )
         if "Nombre" in df_original.columns:
-            m_txt_t3 = m_txt_t3 | df_original["Nombre"].astype(str).str.contains(q_t3, case=False, na=False).to_numpy()
+            m_txt_t3 = m_txt_t3 | (
+                df_original["Nombre"].astype(str).str.contains(
+                    q_t3, case=False, na=False
+                ).to_numpy()
+            )
         if "01_09_APV_NOMBRE" in df_original.columns:
-            m_txt_t3 = m_txt_t3 | df_original["01_09_APV_NOMBRE"].astype(str).str.contains(q_t3, case=False, na=False).to_numpy()
+            m_txt_t3 = m_txt_t3 | (
+                df_original["01_09_APV_NOMBRE"].astype(str).str.contains(
+                    q_t3, case=False, na=False
+                ).to_numpy()
+            )
         mask_filtro_t3 = mask_filtro_t3 & m_txt_t3
 
     idx_t3_all = np.flatnonzero(mask_filtro_t3)
     n_t3_match = len(idx_t3_all)
 
     if n_t3_match > 0:
-        idx_t3_show = idx_t3_all if limite_t3 == "Todas" else idx_t3_all[:int(limite_t3)]
+        idx_t3_show = (
+            idx_t3_all if limite_t3 == "Todas"
+            else idx_t3_all[:int(limite_t3)]
+        )
         cols_p = [
             c for c in [
-                "Archivo_Origen", col_id_nativo, "GlobalId", "Clase_IFC", "Nombre", "01_09_APV_NOMBRE"
+                "Archivo_Origen", col_id_nativo, "GlobalId",
+                "Clase_IFC", "Nombre", "01_09_APV_NOMBRE"
             ] if c in df_original.columns
         ]
         df_t3_view = df_original[cols_p].iloc[idx_t3_show]
-        st.info(f"Mostrando **{len(df_t3_view):,}** de **{n_t3_match:,}** elementos que coinciden con tu filtro.")
+        st.info(
+            f"Mostrando **{len(df_t3_view):,}** de **{n_t3_match:,}** "
+            "elementos que coinciden con tu filtro."
+        )
         st.dataframe(df_t3_view, use_container_width=True, height=450)
 
-        csv_t3 = df_original[cols_p].iloc[idx_t3_all].to_csv(index=False).encode("utf-8")
+        csv_t3 = (
+            df_original[cols_p].iloc[idx_t3_all]
+            .to_csv(index=False).encode("utf-8")
+        )
         st.download_button(
             label=f"⬇️ Descargar los {n_t3_match:,} Elementos Filtrados (CSV)",
             data=csv_t3,
@@ -788,21 +835,33 @@ with tab3:
             key="dl_t3_csv"
         )
     else:
-        st.success("✅ No se encontraron elementos con esos criterios en la Pestaña 3.")
+        st.success(
+            "✅ No se encontraron elementos con esos criterios en la Pestaña 3."
+        )
 
-# --- PESTAÑA 4 (VECTORIZADA Y SIN LÍMITE DE 1,000 REGISTROS) ---
+# --- PESTAÑA 4 ---
 with tab4:
-    st.subheader("4. Calidad de Formato (Estricto APV vs BEP) & Buscador por Modelo")
+    st.subheader(
+        "4. Calidad de Formato (Estricto APV vs BEP) & Buscador por Modelo"
+    )
     st.markdown(
         "El comodín **`-`** está permitido por el BEP y no genera error. "
-        "Se audita el **100% de los elementos** (unidades, estados de obra, espacios en blanco y textos inválidos)."
+        "Se audita el **100% de los elementos** (unidades, estados de obra, "
+        "espacios en blanco y textos inválidos)."
     )
 
-    @st.cache_data(show_spinner="Auditando formato en todos los elementos del proyecto...")
-    def obtener_errores_formato_vectorizado(_df_ref, params_audit, _mask_f, col_id_nat):
+    @st.cache_data(show_spinner="Auditando formato en todos los elementos...")
+    def obtener_errores_formato_vectorizado(
+        _df_ref, params_audit, _mask_f, col_id_nat
+    ):
         uni_validas = {"ud", "m", "m2", "dm3", "m3", "kg", "tn", "pa"}
-        est_validos = {"Existente", "Demolido", "Temporal", "Proyectado", "Construido"}
-        placeholders_malos = {"n/a", "na", "null", "none", "tbd", "sin definir", "por definir", "--", "."}
+        est_validos = {
+            "Existente", "Demolido", "Temporal", "Proyectado", "Construido"
+        }
+        placeholders_malos = {
+            "n/a", "na", "null", "none", "tbd",
+            "sin definir", "por definir", "--", "."
+        }
 
         lista_dfs = []
         for col in params_audit:
@@ -839,19 +898,28 @@ with tab4:
                 m_err = _mask_f & s_col.isin(list(mapa_err.keys())).to_numpy()
                 if m_err.any():
                     idx_err = np.flatnonzero(m_err)
-                    cols_base = ["Archivo_Origen", col_id_nat, "GlobalId", col]
+                    cols_base = [
+                        "Archivo_Origen", col_id_nat, "GlobalId", col
+                    ]
                     if "Clase_IFC" in _df_ref.columns:
                         cols_base.append("Clase_IFC")
                     sub_e = _df_ref[cols_base].iloc[idx_err].copy()
                     sub_e["Parámetro"] = col
-                    sub_e["Infracción BEP"] = sub_e[col].map(mapa_err).fillna("Formato")
+                    sub_e["Infracción BEP"] = (
+                        sub_e[col].map(mapa_err).fillna("Formato")
+                    )
                     sub_e.rename(columns={
                         "Archivo_Origen": "Archivo",
                         col_id_nat: "ID_Elemento",
                         col: "Contenido Detectado"
                     }, inplace=True)
-                    sub_e["Contenido Detectado"] = sub_e["Contenido Detectado"].astype(str)
-                    cols_orden = ["Archivo", "ID_Elemento", "GlobalId", "Parámetro", "Contenido Detectado", "Infracción BEP"]
+                    sub_e["Contenido Detectado"] = (
+                        sub_e["Contenido Detectado"].astype(str)
+                    )
+                    cols_orden = [
+                        "Archivo", "ID_Elemento", "GlobalId",
+                        "Parámetro", "Contenido Detectado", "Infracción BEP"
+                    ]
                     if "Clase_IFC" in sub_e.columns:
                         cols_orden.insert(3, "Clase_IFC")
                     lista_dfs.append(sub_e[cols_orden])
@@ -865,18 +933,33 @@ with tab4:
     )
 
     if not df_err_fmt_total.empty:
+        n_elem_fmt = df_err_fmt_total["GlobalId"].nunique()
         st.error(
-            f"⚠️ Se detectaron **{len(df_err_fmt_total):,}** infracciones de formato en total "
-            f"en **{df_err_fmt_total['GlobalId'].nunique():,}** elementos únicos."
+            f"⚠️ Se detectaron **{len(df_err_fmt_total):,}** infracciones "
+            f"de formato en **{n_elem_fmt:,}** elementos únicos."
         )
 
         c_f4_1, c_f4_2, c_f4_3, c_f4_4 = st.columns([2, 2, 2, 1])
         with c_f4_1:
-            arch_err_disp = sorted(df_err_fmt_total["Archivo"].unique().tolist())
-            sel_arch_f4 = st.multiselect("Filtrar por Modelo IFC:", arch_err_disp, default=arch_err_disp, key="f4_mod")
+            arch_err_disp = sorted(
+                df_err_fmt_total["Archivo"].unique().tolist()
+            )
+            sel_arch_f4 = st.multiselect(
+                "Filtrar por Modelo IFC:",
+                arch_err_disp,
+                default=arch_err_disp,
+                key="f4_mod"
+            )
         with c_f4_2:
-            param_err_disp = sorted(df_err_fmt_total["Parámetro"].unique().tolist())
-            sel_param_f4 = st.multiselect("Filtrar por Parámetro:", param_err_disp, default=param_err_disp, key="f4_par")
+            param_err_disp = sorted(
+                df_err_fmt_total["Parámetro"].unique().tolist()
+            )
+            sel_param_f4 = st.multiselect(
+                "Filtrar por Parámetro:",
+                param_err_disp,
+                default=param_err_disp,
+                key="f4_par"
+            )
         with c_f4_3:
             txt_f4 = st.text_input(
                 "Buscar ID, GlobalId o Valor erróneo:",
@@ -898,39 +981,62 @@ with tab4:
         if txt_f4.strip():
             q_f4 = txt_f4.strip()
             mask_f4 = mask_f4 & (
-                df_err_fmt_total["ID_Elemento"].astype(str).str.contains(q_f4, case=False, na=False)
-                | df_err_fmt_total["GlobalId"].astype(str).str.contains(q_f4, case=False, na=False)
-                | df_err_fmt_total["Contenido Detectado"].astype(str).str.contains(q_f4, case=False, na=False)
-                | df_err_fmt_total["Infracción BEP"].astype(str).str.contains(q_f4, case=False, na=False)
+                df_err_fmt_total["ID_Elemento"].astype(str).str.contains(
+                    q_f4, case=False, na=False
+                )
+                | df_err_fmt_total["GlobalId"].astype(str).str.contains(
+                    q_f4, case=False, na=False
+                )
+                | df_err_fmt_total["Contenido Detectado"].astype(str).str.contains(
+                    q_f4, case=False, na=False
+                )
+                | df_err_fmt_total["Infracción BEP"].astype(str).str.contains(
+                    q_f4, case=False, na=False
+                )
             )
 
         df_f4_filtrado = df_err_fmt_total.loc[mask_f4]
-        df_f4_show = df_f4_filtrado if lim_f4 == "Todas" else df_f4_filtrado.iloc[:int(lim_f4)]
+        df_f4_show = (
+            df_f4_filtrado if lim_f4 == "Todas"
+            else df_f4_filtrado.iloc[:int(lim_f4)]
+        )
 
-        st.info(f"Mostrando **{len(df_f4_show):,}** de **{len(df_f4_filtrado):,}** infracciones filtradas.")
+        st.info(
+            f"Mostrando **{len(df_f4_show):,}** de "
+            f"**{len(df_f4_filtrado):,}** infracciones filtradas."
+        )
         st.dataframe(df_f4_show, use_container_width=True, height=480)
 
         csv_f4 = df_f4_filtrado.to_csv(index=False).encode("utf-8")
         st.download_button(
-            label=f"⬇️ Descargar las {len(df_f4_filtrado):,} Infracciones de Formato Filtradas (CSV)",
+            label=(
+                f"⬇️ Descargar las {len(df_f4_filtrado):,} "
+                "Infracciones de Formato Filtradas (CSV)"
+            ),
             data=csv_f4,
             file_name="Auditoria_APV_Errores_Formato.csv",
             mime="text/csv",
             key="dl_f4_btn"
         )
     else:
-        st.success("✅ Todos los parámetros rellenos cumplen con el formato del BEP.")
+        st.success(
+            "✅ Todos los parámetros rellenos cumplen con el formato del BEP."
+        )
 
-# --- PESTAÑA 5 (SINCRONIZADA CON MODO REAL NAVISWORKS Y BUSCADOR EN SERVIDOR) ---
+# --- PESTAÑA 5 ---
 with tab5:
+    etiqueta_modo_t5 = (
+        "(Visibles en Navisworks)"
+        if modo_real_navisworks else "(Lista Teórica BEP)"
+    )
     st.subheader(
         f"5. Auditoría Exclusiva de los {len(params_auditar)} "
-        f"Parámetros Oficiales APV {'(Visibles en Navisworks)' if modo_real_navisworks else '(Lista Teórica BEP)'}"
+        f"Parámetros Oficiales APV {etiqueta_modo_t5}"
     )
     st.markdown(
         "Si un parámetro contiene **`-`**, se valida como **Comodín BEP "
-        "en Verde (`🟢`)**. En **Modo Real Navisworks**, cada parámetro se audita únicamente sobre los modelos "
-        "que realmente contienen y muestran dicho parámetro en Navisworks."
+        "en Verde (`🟢`)**. En **Modo Real Navisworks**, cada parámetro se "
+        "audita únicamente sobre los modelos que contienen dicho parámetro."
     )
 
     cols_ids_ref = df_original[[col_id_nativo, "GlobalId"]]
@@ -940,7 +1046,6 @@ with tab5:
         es_vac_raw = mascara_vacio_rapida(df_original, p)
         es_com = mask_arr & mascara_comodin_rapida(df_original, p)
         es_dato = mask_arr & (~es_vac_raw) & (~es_com)
-
         es_vac = mask_arr & mascara_vacio_efectiva(df_original, p)
 
         n_vac = int(es_vac.sum())
@@ -984,7 +1089,9 @@ with tab5:
 
     def colorear_estado(val):
         if "🟢" in str(val):
-            return "background-color: #d4edda; color: #155724; font-weight: bold;"
+            return (
+                "background-color: #d4edda; color: #155724; font-weight: bold;"
+            )
         return "background-color: #f8d7da; color: #721c24; font-weight: bold;"
 
     st.dataframe(
@@ -995,11 +1102,11 @@ with tab5:
     if n_inc_total > 0:
         st.markdown("---")
         st.markdown(
-            f"#### 🔍 Buscador Global e Inspector de Elementos con Parámetros Vacíos "
-            f"(Total detectados en modo actual: **{n_inc_total:,}** elementos)"
+            "#### 🔍 Buscador Global e Inspector de Elementos con "
+            f"Parámetros Vacíos (Total detectados: **{n_inc_total:,}**)"
         )
         st.caption(
-            "💡 A diferencia de la lupa interna de la tabla, este buscador filtra directamente sobre los "
+            "💡 Este buscador filtra directamente sobre los "
             f"**{n_inc_total:,} elementos** en memoria antes de mostrar la tabla."
         )
 
@@ -1012,7 +1119,9 @@ with tab5:
                 key="v5_mod_filter"
             )
         with c_v5_2:
-            params_con_vacios = df_res_vacios.loc[df_res_vacios["Vacíos (Error)"] > 0, "Parámetro Oficial APV"].tolist()
+            params_con_vacios = df_res_vacios.loc[
+                df_res_vacios["Vacíos (Error)"] > 0, "Parámetro Oficial APV"
+            ].tolist()
             param_esp_v5 = st.selectbox(
                 "2️⃣ Filtrar por Parámetro Vacío específico:",
                 options=["TODOS (Cualquier parámetro vacío)"] + params_con_vacios,
@@ -1033,30 +1142,54 @@ with tab5:
                 key="v5_page_size"
             )
 
-        mask_v5_search = mask_tiene_vacios & df_original["Archivo_Origen"].isin(mod_sel_v5).to_numpy()
+        mask_v5_search = (
+            mask_tiene_vacios
+            & df_original["Archivo_Origen"].isin(mod_sel_v5).to_numpy()
+        )
 
         if param_esp_v5 != "TODOS (Cualquier parámetro vacío)":
-            mask_v5_search = mask_v5_search & mascara_vacio_efectiva(df_original, param_esp_v5)
+            mask_v5_search = (
+                mask_v5_search
+                & mascara_vacio_efectiva(df_original, param_esp_v5)
+            )
 
         if txt_buscar_v5.strip():
             q_v5 = txt_buscar_v5.strip()
             m_txt_v5 = (
-                df_original["GlobalId"].astype(str).str.contains(q_v5, case=False, na=False).to_numpy()
-                | df_original[col_id_nativo].astype(str).str.contains(q_v5, case=False, na=False).to_numpy()
-                | df_original["Clase_IFC"].astype(str).str.contains(q_v5, case=False, na=False).to_numpy()
-                | df_original["Archivo_Origen"].astype(str).str.contains(q_v5, case=False, na=False).to_numpy()
+                df_original["GlobalId"].astype(str).str.contains(
+                    q_v5, case=False, na=False
+                ).to_numpy()
+                | df_original[col_id_nativo].astype(str).str.contains(
+                    q_v5, case=False, na=False
+                ).to_numpy()
+                | df_original["Clase_IFC"].astype(str).str.contains(
+                    q_v5, case=False, na=False
+                ).to_numpy()
+                | df_original["Archivo_Origen"].astype(str).str.contains(
+                    q_v5, case=False, na=False
+                ).to_numpy()
             )
             if "Nombre" in df_original.columns:
-                m_txt_v5 = m_txt_v5 | df_original["Nombre"].astype(str).str.contains(q_v5, case=False, na=False).to_numpy()
+                m_txt_v5 = m_txt_v5 | (
+                    df_original["Nombre"].astype(str).str.contains(
+                        q_v5, case=False, na=False
+                    ).to_numpy()
+                )
             if "01_09_APV_NOMBRE" in df_original.columns:
-                m_txt_v5 = m_txt_v5 | df_original["01_09_APV_NOMBRE"].astype(str).str.contains(q_v5, case=False, na=False).to_numpy()
+                m_txt_v5 = m_txt_v5 | (
+                    df_original["01_09_APV_NOMBRE"].astype(str).str.contains(
+                        q_v5, case=False, na=False
+                    ).to_numpy()
+                )
             mask_v5_search = mask_v5_search & m_txt_v5
 
         idx_v5_all = np.flatnonzero(mask_v5_search)
         n_v5_encontrados = len(idx_v5_all)
 
         if n_v5_encontrados > 0:
-            total_paginas_v5 = max(1, int(np.ceil(n_v5_encontrados / int(tam_pag_v5))))
+            total_paginas_v5 = max(
+                1, int(np.ceil(n_v5_encontrados / int(tam_pag_v5)))
+            )
             col_pg1, col_pg2 = st.columns([1, 3])
             with col_pg1:
                 pag_v5 = st.number_input(
@@ -1073,26 +1206,31 @@ with tab5:
 
             with col_pg2:
                 st.info(
-                    f"✅ Se encontraron **{n_v5_encontrados:,}** elementos que coinciden con tu búsqueda. "
+                    f"✅ Se encontraron **{n_v5_encontrados:,}** elementos. "
                     f"Mostrando filas **{inicio_v5 + 1:,}** a **{fin_v5:,}**."
                 )
 
             cols_b = [
                 c for c in [
-                    "Archivo_Origen", col_id_nativo, "GlobalId", "Clase_IFC", "Nombre", "01_09_APV_NOMBRE"
+                    "Archivo_Origen", col_id_nativo, "GlobalId",
+                    "Clase_IFC", "Nombre", "01_09_APV_NOMBRE"
                 ] if c in df_original.columns
             ]
             df_inc_view = df_original[cols_b].iloc[idx_inc].copy()
             df_inc_view["Cant_Vacios"] = s_vac_arr[idx_inc]
 
-            params_disp = [p for p in params_auditar if p in df_original.columns]
+            params_disp = [
+                p for p in params_auditar if p in df_original.columns
+            ]
             sub_p = df_original[params_disp].iloc[idx_inc]
             mat_vac = sub_p.isna() | sub_p.isin(VACIOS_EXACTOS)
             if modo_real_navisworks:
                 arch_sub = df_original["Archivo_Origen"].iloc[idx_inc].values
                 mat_existe_mod = matriz_presencia_nw.loc[arch_sub, params_disp]
                 mat_vac = mat_vac.values & mat_existe_mod.values
-                mat_vac = pd.DataFrame(mat_vac, index=sub_p.index, columns=params_disp)
+                mat_vac = pd.DataFrame(
+                    mat_vac, index=sub_p.index, columns=params_disp
+                )
 
             df_inc_view["Parámetros_Vacíos"] = mat_vac.apply(
                 lambda r: ", ".join(r.index[r]), axis=1
@@ -1103,7 +1241,10 @@ with tab5:
             with col_dl1:
                 csv_pag_v5 = df_inc_view.to_csv(index=False).encode("utf-8")
                 st.download_button(
-                    label=f"⬇️ Descargar esta página con detalle de Parámetros Vacíos ({len(df_inc_view):,} filas CSV)",
+                    label=(
+                        "⬇️ Descargar esta página con detalle de "
+                        f"Parámetros Vacíos ({len(df_inc_view):,} filas CSV)"
+                    ),
                     data=csv_pag_v5,
                     file_name=f"Elementos_Vacios_Pagina_{pag_v5}.csv",
                     mime="text/csv",
@@ -1113,19 +1254,29 @@ with tab5:
             with col_dl2:
                 df_all_v5_export = df_original[cols_b].iloc[idx_v5_all].copy()
                 df_all_v5_export["Cant_Vacios"] = s_vac_arr[idx_v5_all]
-                csv_all_v5 = df_all_v5_export.to_csv(index=False).encode("utf-8")
+                csv_all_v5 = (
+                    df_all_v5_export.to_csv(index=False).encode("utf-8")
+                )
                 st.download_button(
-                    label=f"⬇️ Descargar TODOS los {n_v5_encontrados:,} IDs/GUIDs encontrados (CSV Completo)",
+                    label=(
+                        f"⬇️ Descargar TODOS los {n_v5_encontrados:,} "
+                        "IDs/GUIDs encontrados (CSV Completo)"
+                    ),
                     data=csv_all_v5,
-                    file_name="Auditoria_APV_Todos_Elementos_Vacios_Filtrados.csv",
+                    file_name="Auditoria_APV_Todos_Elementos_Vacios.csv",
                     mime="text/csv",
                     key="dl_v5_all",
                     use_container_width=True
                 )
         else:
-            st.warning("⚠️ Ningún elemento con vacíos coincide con ese criterio de búsqueda.")
+            st.warning(
+                "⚠️ Ningún elemento con vacíos coincide con ese criterio."
+            )
     else:
-        st.success("🎉 ¡Cero elementos con parámetros vacíos bajo la configuración actual de Navisworks!")
+        st.success(
+            "🎉 ¡Cero elementos con parámetros vacíos bajo la "
+            "configuración actual de Navisworks!"
+        )
 
 # --- PESTAÑA 6 ---
 with tab6:
@@ -1229,9 +1380,12 @@ with tab7:
     else:
         c_s3.metric("Peso Consolidado de Modelos", "0.0 MB")
 
-# --- PESTAÑA 8 (CALIBRADA CON NAVISWORKS: SIN FALSOS "100% INCOMPLETO") ---
+# --- PESTAÑA 8 ---
 with tab8:
-    st.subheader("🚨 8. Alertas y Diagnóstico de IFCs por Modelo (Sincronizado con Navisworks)")
+    st.subheader(
+        "🚨 8. Alertas y Diagnóstico de IFCs por Modelo "
+        "(Sincronizado con Navisworks)"
+    )
     df_t8 = pd.DataFrame({
         "arch": df_original["Archivo_Origen"].loc[mask_arr],
         "tiene_vac": (s_vac_arr[mask_arr] > 0),
@@ -1247,24 +1401,48 @@ with tab8:
     resumen_modelos_alt = []
     for arch in archivos_disp:
         tot = int(grp_t8.loc[arch, "tot"]) if arch in grp_t8.index else 0
-        n_v_m = int(grp_t8.loc[arch, "elem_con_vac"]) if arch in grp_t8.index else 0
-        s_v_m = int(grp_t8.loc[arch, "suma_vac"]) if arch in grp_t8.index else 0
-        s_p_m = int(grp_t8.loc[arch, "suma_pres"]) if arch in grp_t8.index else 0
-        n_params_nw_mod = int(matriz_presencia_nw.loc[arch, params_base_lista].sum()) if arch in matriz_presencia_nw.index else 0
+        n_v_m = (
+            int(grp_t8.loc[arch, "elem_con_vac"])
+            if arch in grp_t8.index else 0
+        )
+        s_v_m = (
+            int(grp_t8.loc[arch, "suma_vac"])
+            if arch in grp_t8.index else 0
+        )
+        s_p_m = (
+            int(grp_t8.loc[arch, "suma_pres"])
+            if arch in grp_t8.index else 0
+        )
+        n_params_nw_mod = (
+            int(matriz_presencia_nw.loc[arch, params_base_lista].sum())
+            if arch in matriz_presencia_nw.index else 0
+        )
 
         denom_celdas = max(1, s_p_m + s_v_m)
-        pct_completitud_nw = round((s_p_m / denom_celdas) * 100, 1) if (s_p_m + s_v_m) > 0 else 0.0
+        pct_completitud_nw = (
+            round((s_p_m / denom_celdas) * 100, 1)
+            if (s_p_m + s_v_m) > 0 else 0.0
+        )
 
         if tot == 0:
             est = "🚨 IFC Sin Elementos"
         elif s_p_m == 0:
-            est = "⚠️ Psets en Contenedor/Tipo no extraídos al Parquet (Usar convertidor_ifc.py optimizado)"
+            est = (
+                "⚠️ Psets en Contenedor/Tipo no extraídos al Parquet "
+                "(Usar convertidor_ifc.py optimizado)"
+            )
         elif n_v_m == 0 or pct_completitud_nw >= 99.9:
             est = f"🟢 100% Completo en Navisworks ({n_params_nw_mod} params)"
         elif pct_completitud_nw >= 85.0:
-            est = f"🟢 {pct_completitud_nw}% Completo en Navisworks ({n_v_m:,} elem. con algún vacío)"
+            est = (
+                f"🟢 {pct_completitud_nw}% Completo en Navisworks "
+                f"({n_v_m:,} elem. con algún vacío)"
+            )
         else:
-            est = f"🟡 {pct_completitud_nw}% Completo ({n_v_m:,} elem. con algún vacío)"
+            est = (
+                f"🟡 {pct_completitud_nw}% Completo "
+                f"({n_v_m:,} elem. con algún vacío)"
+            )
 
         resumen_modelos_alt.append({
             "Archivo IFC": arch,
@@ -1285,21 +1463,29 @@ with tab9:
     )
     st.dataframe(df_informe_grupos, use_container_width=True)
 
-# --- PESTAÑA 10 (DISEÑO DETALLADO CON DESPLEGABLE + COPIAR Y PEGAR GUID / ID) ---
+# --- PESTAÑA 10 ---
 with tab10:
-    st.subheader("🔍 10. Ficha Detallada por Elemento (Inspector BIM Sincronizado con Navisworks)")
+    st.subheader(
+        "🔍 10. Ficha Detallada por Elemento "
+        "(Inspector BIM Sincronizado con Navisworks)"
+    )
     st.markdown(
-        "Selecciona un elemento de la lista desplegable o **copia y pega directamente su `GlobalId` o `ID_Elemento`** "
-        "(por ejemplo, desde las Pestañas 3, 4 o 5) para auditar los parámetros APV que muestra Navisworks."
+        "Selecciona un elemento de la lista desplegable o **copia y pega "
+        "directamente su `GlobalId` o `ID_Elemento`** para auditar los "
+        "parámetros APV que muestra Navisworks."
     )
 
-    ids_disponibles_t10 = df_original.loc[mask_arr, "GlobalId"].dropna().unique()[:5000]
+    ids_disponibles_t10 = (
+        df_original.loc[mask_arr, "GlobalId"].dropna().unique()[:5000]
+    )
 
     col_sel10, col_paste10 = st.columns(2)
     with col_sel10:
         idx_default_10 = 0
         if "3H0KjjMnv619yNSGbFXGIK" in ids_disponibles_t10:
-            idx_default_10 = int(np.where(ids_disponibles_t10 == "3H0KjjMnv619yNSGbFXGIK")[0][0])
+            idx_default_10 = int(
+                np.where(ids_disponibles_t10 == "3H0KjjMnv619yNSGbFXGIK")[0][0]
+            )
         id_seleccionado_lista = st.selectbox(
             "Selecciona un GlobalId de la lista:",
             options=ids_disponibles_t10,
@@ -1308,9 +1494,9 @@ with tab10:
         )
     with col_paste10:
         id_pegado_texto = st.text_input(
-            "📋 O copia y pega aquí cualquier GlobalId o ID_Elemento (prioritario):",
+            "📋 O copia y pega aquí cualquier GlobalId o ID_Elemento:",
             value="",
-            placeholder="Pega aquí ej: 3H0KjjMnv619yNSGbFXGIK o #168987 o 152831",
+            placeholder="Pega aquí ej: 3H0KjjMnv619yNSGbFXGIK o #168987",
             key="paste_ficha_id"
         )
 
@@ -1327,13 +1513,19 @@ with tab10:
             elem_df_match = df_original.loc[m_exact]
         else:
             m_part = (
-                df_original["GlobalId"].astype(str).str.contains(q10, case=False, na=False)
-                | df_original[col_id_nativo].astype(str).str.contains(q10, case=False, na=False)
+                df_original["GlobalId"].astype(str).str.contains(
+                    q10, case=False, na=False
+                )
+                | df_original[col_id_nativo].astype(str).str.contains(
+                    q10, case=False, na=False
+                )
             )
             elem_df_match = df_original.loc[m_part]
     elif len(ids_disponibles_t10) > 0:
         criterio_usado = str(id_seleccionado_lista)
-        elem_df_match = df_original.loc[df_original["GlobalId"] == id_seleccionado_lista]
+        elem_df_match = df_original.loc[
+            df_original["GlobalId"] == id_seleccionado_lista
+        ]
 
     if not elem_df_match.empty:
         idx_match = elem_df_match.index
@@ -1341,14 +1533,23 @@ with tab10:
         elem_df_match = df_original.loc[orden_m]
 
         if len(elem_df_match) > 1:
-            st.info(f"🔎 Se encontraron **{len(elem_df_match)}** instancias que coinciden con `{criterio_usado}` (ordenada primero la más completa en Navisworks):")
+            st.info(
+                f"🔎 Se encontraron **{len(elem_df_match)}** instancias "
+                f"para `{criterio_usado}` (ordenada primero la más completa):"
+            )
             opciones_desempate = [
                 f"{r['GlobalId']} | ID: {r[col_id_nativo]} | {r['Archivo_Origen']}"
                 for _, r in elem_df_match.head(50).iterrows()
             ]
-            eleccion_desempate = st.selectbox("Elegir coincidencia exacta:", opciones_desempate, key="t10_desempate")
+            eleccion_desempate = st.selectbox(
+                "Elegir coincidencia exacta:",
+                opciones_desempate,
+                key="t10_desempate"
+            )
             guid_elegido = eleccion_desempate.split(" | ")[0]
-            elem_info = elem_df_match.loc[elem_df_match["GlobalId"].astype(str) == guid_elegido].iloc[0]
+            elem_info = elem_df_match.loc[
+                elem_df_match["GlobalId"].astype(str) == guid_elegido
+            ].iloc[0]
         else:
             elem_info = elem_df_match.iloc[0]
 
@@ -1365,14 +1566,25 @@ with tab10:
         else:
             params_ficha_elem = params_auditar
 
-        with st.expander(f"📋 Ficha Detallada del Elemento en Navisworks: {guid_actual}", expanded=True):
+        with st.expander(
+            f"📋 Ficha Detallada del Elemento en Navisworks: {guid_actual}",
+            expanded=True
+        ):
             col_f1, col_f2, col_f3 = st.columns(3)
             with col_f1:
                 st.metric("Clase IFC", str(elem_info.get("Clase_IFC", "N/A")))
                 st.metric("Archivo Origen", str(arch_elem))
             with col_f2:
-                st.metric("ID Nativo (Revit/C3D)", str(elem_info.get(col_id_nativo, "N/A")))
-                st.metric("Nombre Objeto", str(elem_info.get("Nombre", elem_info.get("01_09_APV_NOMBRE", "N/A"))))
+                st.metric(
+                    "ID Nativo (Revit/C3D)",
+                    str(elem_info.get(col_id_nativo, "N/A"))
+                )
+                st.metric(
+                    "Nombre Objeto",
+                    str(elem_info.get(
+                        "Nombre", elem_info.get("01_09_APV_NOMBRE", "N/A")
+                    ))
+                )
             with col_f3:
                 n_vacios_elem = 0
                 n_comodines_elem = 0
@@ -1380,8 +1592,14 @@ with tab10:
                 filas_ficha = []
                 for p in params_ficha_elem:
                     val_p = elem_info.get(p, np.nan)
-                    es_v = pd.isna(val_p) or str(val_p).strip() in VACIOS_EXACTOS
-                    es_c = (not es_v) and (str(val_p).strip() in COMODINES_EXACTOS)
+                    es_v = (
+                        pd.isna(val_p)
+                        or str(val_p).strip() in VACIOS_EXACTOS
+                    )
+                    es_c = (
+                        (not es_v)
+                        and (str(val_p).strip() in COMODINES_EXACTOS)
+                    )
                     if es_v:
                         n_vacios_elem += 1
                         est_p = "🔴 Vacío (Falta Dato)"
@@ -1394,17 +1612,39 @@ with tab10:
                     filas_ficha.append({
                         "Grupo BEP": p.split("_")[0],
                         "Parámetro BEP": p,
-                        "Valor en Navisworks": "" if pd.isna(val_p) else str(val_p),
+                        "Valor en Navisworks": (
+                            "" if pd.isna(val_p) else str(val_p)
+                        ),
                         "Estado": est_p
                     })
-                pct_obj = round(((n_datos_elem + n_comodines_elem) / max(1, len(params_ficha_elem))) * 100, 1)
-                st.metric("Parámetros Vacíos (Navisworks)", n_vacios_elem, delta=f"{pct_obj}% Cumplimiento", delta_color="inverse")
-                st.caption(f"🟢 Con dato: **{n_datos_elem}** | 🟡 Comodín (-): **{n_comodines_elem}** | 🔴 Vacíos: **{n_vacios_elem}**")
+                pct_obj = round(
+                    ((n_datos_elem + n_comodines_elem)
+                     / max(1, len(params_ficha_elem))) * 100,
+                    1
+                )
+                st.metric(
+                    "Parámetros Vacíos (Navisworks)",
+                    n_vacios_elem,
+                    delta=f"{pct_obj}% Cumplimiento",
+                    delta_color="inverse"
+                )
+                st.caption(
+                    f"🟢 Con dato: **{n_datos_elem}** | "
+                    f"🟡 Comodín (-): **{n_comodines_elem}** | "
+                    f"🔴 Vacíos: **{n_vacios_elem}**"
+                )
 
-            st.markdown("##### 📊 Auditoría Individual de Parámetros de este Objeto (Vista Real Navisworks):")
+            st.markdown(
+                "##### 📊 Auditoría Individual de Parámetros "
+                "(Vista Real Navisworks):"
+            )
             filtro_vista_ficha = st.radio(
                 "Filtrar parámetros de la ficha:",
-                options=["🟢 Solo Parámetros Rellenos / Comodín (Visibles en Navisworks)", "Todos los Parámetros del Modelo", "🔴 Solo Parámetros Vacíos (Que Fallan)"],
+                options=[
+                    "🟢 Solo Parámetros Rellenos / Comodín (Visibles en Navisworks)",
+                    "Todos los Parámetros del Modelo",
+                    "🔴 Solo Parámetros Vacíos (Que Fallan)"
+                ],
                 horizontal=True,
                 key="t10_radio_filtro"
             )
@@ -1416,10 +1656,19 @@ with tab10:
 
             def estilo_fila_ficha(val):
                 if "🔴" in str(val):
-                    return "background-color: #f8d7da; color: #721c24; font-weight: bold;"
+                    return (
+                        "background-color: #f8d7da; color: #721c24; "
+                        "font-weight: bold;"
+                    )
                 if "🟡" in str(val):
-                    return "background-color: #fff3cd; color: #856404; font-weight: bold;"
-                return "background-color: #d4edda; color: #155724; font-weight: bold;"
+                    return (
+                        "background-color: #fff3cd; color: #856404; "
+                        "font-weight: bold;"
+                    )
+                return (
+                    "background-color: #d4edda; color: #155724; "
+                    "font-weight: bold;"
+                )
 
             st.dataframe(
                 df_ficha.style.map(estilo_fila_ficha, subset=["Estado"]),
@@ -1428,14 +1677,18 @@ with tab10:
                 height=450
             )
     else:
-        st.error(f"❌ No se encontró ningún elemento con el identificador `{criterio_usado}` en la base de datos.")
+        st.error(
+            f"❌ No se encontró ningún elemento con el identificador "
+            f"`{criterio_usado}` en la base de datos."
+        )
 
-# --- PESTAÑA 11 (ASISTENTE IA CONVERSACIONAL CONECTADO A TUS DATOS REALES) ---
+# --- PESTAÑA 11 ---
 with tab11:
     st.subheader("💬 11. Asistente IA de Entrega y Auditoría BIM - APV")
     st.markdown(
-        "Haz preguntas en lenguaje natural sobre tu entrega: **qué modelos tienen más errores, qué parámetros faltan, "
-        "estado de un archivo `.ifc` específico, proxies, pesos o reglas del BEP**."
+        "Haz preguntas en lenguaje natural sobre tu entrega: **qué modelos "
+        "tienen más errores, qué parámetros faltan, estado de un archivo "
+        "`.ifc` específico, proxies, pesos o reglas del BEP**."
     )
 
     if "messages" not in st.session_state:
@@ -1443,8 +1696,10 @@ with tab11:
             {
                 "role": "assistant",
                 "content": (
-                    f"¡Hola Claudia! Estoy conectado en vivo a los **{len(sel_archivos)} modelos IFC** "
-                    f"(**{total_el:,} elementos sincronizados con Navisworks**). Puedes preguntarme cosas como:\n"
+                    f"¡Hola Claudia! Estoy conectado en vivo a los "
+                    f"**{len(sel_archivos)} modelos IFC** (**{total_el:,} "
+                    "elementos sincronizados con Navisworks**). "
+                    "Puedes preguntarme cosas como:\n"
                     "- *¿Cuáles son los 5 parámetros que más fallan?*\n"
                     "- *¿Qué pasa con el modelo CoDrag2VLC?*\n"
                     "- *¿Cuántos proxies hay y en qué modelos están?*\n"
@@ -1457,94 +1712,186 @@ with tab11:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    if prompt := st.chat_input("Escribe tu consulta sobre la entrega BIM de la APV..."):
+    if prompt := st.chat_input(
+        "Escribe tu consulta sobre la entrega BIM de la APV..."
+    ):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
 
         with st.chat_message("assistant"):
             p_low = prompt.lower()
-            top_vacios_ia = df_res_vacios.sort_values("Vacíos (Error)", ascending=False).head(5)
+            top_vacios_ia = df_res_vacios.sort_values(
+                "Vacíos (Error)", ascending=False
+            ).head(5)
 
             if "codrag" in p_low or "drag2vlc" in p_low:
                 respuesta = (
-                    "Sobre el modelo **`CoDrag2VLC`**: en Navisworks ves sus parámetros llenos porque Navisworks lee "
-                    "automáticamente la herencia desde el **Tipo (`IfcTypeObject`)** y desde el **Contenedor Padre (`IfcSite` / `IfcElementAssembly`)**. "
-                    "Al regenerar el `.parquet` con el script `convertidor_ifc.py` optimizado, `CoDrag2VLC` incorpora todos sus parámetros heredados."
+                    "Sobre el modelo **`CoDrag2VLC`**: en Navisworks ves sus "
+                    "parámetros llenos porque Navisworks lee automáticamente "
+                    "la herencia desde el **Tipo (`IfcTypeObject`)** y desde "
+                    "el **Contenedor Padre (`IfcSite` / `IfcElementAssembly`)**. "
+                    "Al regenerar el `.parquet` con el script `convertidor_ifc.py` "
+                    "optimizado, `CoDrag2VLC` incorpora todos sus parámetros."
                 )
-            elif any(k in p_low for k in ["parametro", "parámetro", "fallan", "peor", "critico", "crítico"]):
+            elif any(
+                k in p_low for k in [
+                    "parametro", "parámetro", "fallan",
+                    "peor", "critico", "crítico"
+                ]
+            ):
                 lineas_p = "\n".join([
-                    f"- **`{r['Parámetro Oficial APV']}`**: faltan **{r['Vacíos (Error)']:,}** elementos ({r['% Cumplimiento (Dato + \'-\')']}% cumplido)."
+                    f"- **`{r['Parámetro Oficial APV']}`**: faltan "
+                    f"**{r['Vacíos (Error)']:,}** elementos "
+                    f"({r['% Cumplimiento (Dato + \'-\')']}% cumplido)."
                     for _, r in top_vacios_ia.iterrows()
                 ])
                 respuesta = (
-                    f"Los **5 parámetros oficiales APV con más vacíos reales en Navisworks** en esta entrega son:\n\n{lineas_p}\n\n"
-                    "💡 *Puedes ir a la **Pestaña 5** y seleccionar cualquiera de ellos en el desplegable `2️⃣ Filtrar por Parámetro Vacío` para ver exactamente qué elementos son.*"
+                    "Los **5 parámetros oficiales APV con más vacíos reales "
+                    f"en Navisworks** en esta entrega son:\n\n{lineas_p}\n\n"
+                    "💡 *Puedes ir a la **Pestaña 5** y seleccionar cualquiera "
+                    "de ellos para ver exactamente qué elementos son.*"
                 )
-            elif any(k in p_low for k in ["proxy", "proxies", "generico", "genérico"]):
+            elif any(
+                k in p_low for k in ["proxy", "proxies", "generico", "genérico"]
+            ):
                 respuesta = (
-                    f"Actualmente se detectan **{n_proxys:,} elementos `IfcBuildingElementProxy`** en los modelos seleccionados. "
-                    "En la **Pestaña 3** tienes el buscador desbloqueado para filtrarlos por modelo y descargar el listado completo en CSV."
+                    f"Actualmente se detectan **{n_proxys:,} elementos "
+                    "`IfcBuildingElementProxy`** en los modelos seleccionados. "
+                    "En la **Pestaña 3** tienes el buscador para filtrarlos."
                 )
             elif any(k in p_low for k in ["formato", "unidad", "estado"]):
-                respuesta = (
-                    f"En la auditoría estricta de formato (**Pestaña 4**) se han detectado **{len(df_err_fmt_total):,} infracciones** "
-                    f"repartidas en **{df_err_fmt_total['Archivo'].nunique() if not df_err_fmt_total.empty else 0} modelos IFC**."
+                n_arch_err = (
+                    df_err_fmt_total["Archivo"].nunique()
+                    if not df_err_fmt_total.empty else 0
                 )
-            elif any(k in p_low for k in ["mes", "anterior", "avance", "regresion", "regresión"]):
-                estado_reg = "✅ CUMPLE" if len(sel_archivos) >= umbral_mes_anterior else "🚨 INCUMPLE"
                 respuesta = (
-                    f"Respecto al control de avance mensual: tienes **{len(sel_archivos)} modelos activos** frente al umbral de "
-                    f"**{umbral_mes_anterior} modelos** del mes anterior (**{estado_reg}** la regla de no-regresión)."
+                    "En la auditoría estricta de formato (**Pestaña 4**) "
+                    f"se han detectado **{len(df_err_fmt_total):,} infracciones** "
+                    f"repartidas en **{n_arch_err} modelos IFC**."
+                )
+            elif any(
+                k in p_low for k in [
+                    "mes", "anterior", "avance", "regresion", "regresión"
+                ]
+            ):
+                estado_reg = (
+                    "✅ CUMPLE"
+                    if len(sel_archivos) >= umbral_mes_anterior
+                    else "🚨 INCUMPLE"
+                )
+                respuesta = (
+                    f"Respecto al control de avance mensual: tienes "
+                    f"**{len(sel_archivos)} modelos activos** frente al umbral "
+                    f"de **{umbral_mes_anterior} modelos** del mes anterior "
+                    f"(**{estado_reg}** la regla de no-regresión)."
                 )
             else:
-                pct_global_ia = round(float(df_res_vacios["% Cumplimiento (Dato + '-')"].mean()), 1) if not df_res_vacios.empty else 0.0
+                pct_global_ia = (
+                    round(
+                        float(df_res_vacios["% Cumplimiento (Dato + '-')"].mean()),
+                        1
+                    )
+                    if not df_res_vacios.empty else 0.0
+                )
                 respuesta = (
-                    f"**Resumen en vivo de tu entrega APV (Sincronizado con Navisworks):**\n"
-                    f"- **Modelos IFC auditados:** {len(sel_archivos)} archivos ({round(peso_total, 2)} MB)\n"
+                    "**Resumen en vivo de tu entrega APV "
+                    "(Sincronizado con Navisworks):**\n"
+                    f"- **Modelos IFC auditados:** {len(sel_archivos)} "
+                    f"archivos ({round(peso_total, 2)} MB)\n"
                     f"- **Elementos reales auditados:** {total_el:,} objetos\n"
-                    f"- **Cumplimiento medio de parámetros en Navisworks:** {pct_global_ia}%\n"
+                    f"- **Cumplimiento medio en Navisworks:** {pct_global_ia}%\n"
                     f"- **Elementos con algún vacío real:** {n_inc_total:,}\n"
-                    f"- **Infracciones de formato:** {len(df_err_fmt_total):,}\n\n"
-                    "Pregúntame por *parámetros críticos*, *CoDrag2VLC*, *proxies*, *errores de formato* o revisa la **Pestaña 12** para descargar el informe ejecutivo."
+                    f"- **Infracciones de formato:** {len(df_err_fmt_total):,}"
                 )
 
             st.markdown(respuesta)
-            st.session_state.messages.append({"role": "assistant", "content": respuesta})
+            st.session_state.messages.append(
+                {"role": "assistant", "content": respuesta}
+            )
 
-# --- PESTAÑA 12 (RESUMEN EJECUTIVO VISUAL DE ALTO IMPACTO & DESCARGA CON HIPERVÍNCULOS) ---
+# --- PESTAÑA 12 ---
 with tab12:
     fecha_actual_str = datetime.now().strftime("%d/%m/%Y %H:%M")
-    st.subheader("📄 12. Resumen Ejecutivo de Dirección & Exportación Interactiva - APV")
-    st.caption(f"Autoridad Portuaria de Valencia (APV) · Contrato N035 · Fecha de emisión: {fecha_actual_str}")
+    st.subheader(
+        "📄 12. Resumen Ejecutivo de Dirección & Exportación Interactiva - APV"
+    )
+    st.caption(
+        "Autoridad Portuaria de Valencia (APV) · Contrato N035 · "
+        f"Fecha de emisión: {fecha_actual_str}"
+    )
 
     total_celdas_datos = int(df_res_vacios["Con Dato Real"].sum())
     total_celdas_comodin = int(df_res_vacios["Con Comodín (-) Válido"].sum())
     total_celdas_vacias = int(df_res_vacios["Vacíos (Error)"].sum())
-    total_celdas_auditadas = max(1, total_celdas_datos + total_celdas_comodin + total_celdas_vacias)
-    pct_cumplimiento_global = round(((total_celdas_datos + total_celdas_comodin) / total_celdas_auditadas) * 100, 1)
+    total_celdas_auditadas = max(
+        1, total_celdas_datos + total_celdas_comodin + total_celdas_vacias
+    )
+    pct_cumplimiento_global = round(
+        ((total_celdas_datos + total_celdas_comodin) / total_celdas_auditadas)
+        * 100,
+        1
+    )
 
-    n_naming_ok = sum(1 for r in res_naming if "✅" in r["Cumple Nomenclatura BEP (y Razón Exacta)"])
+    n_naming_ok = sum(
+        1 for r in res_naming
+        if "✅" in r["Cumple Nomenclatura BEP (y Razón Exacta)"]
+    )
     pct_naming_ok = round((n_naming_ok / max(1, len(res_naming))) * 100, 1)
 
     geo_consistente = not (
-        len(df_geo) > 1 and (df_geo["Origen Site X"].nunique() > 1 or df_geo["Origen Site Y"].nunique() > 1)
+        len(df_geo) > 1
+        and (
+            df_geo["Origen Site X"].nunique() > 1
+            or df_geo["Origen Site Y"].nunique() > 1
+        )
     )
 
     k1, k2, k3, k4, k5, k6 = st.columns(6)
     with k1:
-        st.markdown(f'<div class="kpi-card"><div class="kpi-title">Modelos IFC</div><div class="kpi-value">{len(sel_archivos)}</div><div class="kpi-sub">Umbral mes ant: {umbral_mes_anterior}</div></div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="kpi-card"><div class="kpi-title">Modelos IFC</div>'
+            f'<div class="kpi-value">{len(sel_archivos)}</div>'
+            f'<div class="kpi-sub">Umbral mes ant: {umbral_mes_anterior}'
+            '</div></div>',
+            unsafe_allow_html=True
+        )
     with k2:
-        st.markdown(f'<div class="kpi-card"><div class="kpi-title">Elementos BIM</div><div class="kpi-value">{total_el:,}</div><div class="kpi-sub">Objetos Navisworks</div></div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="kpi-card"><div class="kpi-title">Elementos BIM</div>'
+            f'<div class="kpi-value">{total_el:,}</div>'
+            '<div class="kpi-sub">Objetos Navisworks</div></div>',
+            unsafe_allow_html=True
+        )
     with k3:
-        st.markdown(f'<div class="kpi-card"><div class="kpi-title">Cumplimiento BEP</div><div class="kpi-value">{pct_cumplimiento_global}%</div><div class="kpi-sub">Real en Navisworks</div></div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="kpi-card"><div class="kpi-title">Cumplimiento BEP</div>'
+            f'<div class="kpi-value">{pct_cumplimiento_global}%</div>'
+            '<div class="kpi-sub">Real en Navisworks</div></div>',
+            unsafe_allow_html=True
+        )
     with k4:
-        st.markdown(f'<div class="kpi-card"><div class="kpi-title">Naming Anejo 02</div><div class="kpi-value">{pct_naming_ok}%</div><div class="kpi-sub">{n_naming_ok}/{len(res_naming)} Modelos OK</div></div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="kpi-card"><div class="kpi-title">Naming Anejo 02</div>'
+            f'<div class="kpi-value">{pct_naming_ok}%</div>'
+            f'<div class="kpi-sub">{n_naming_ok}/{len(res_naming)} OK</div></div>',
+            unsafe_allow_html=True
+        )
     with k5:
         est_geo_kpi = "100% OK" if geo_consistente else "ALERTA"
-        st.markdown(f'<div class="kpi-card"><div class="kpi-title">Georreferenciación</div><div class="kpi-value">{est_geo_kpi}</div><div class="kpi-sub">ETRS89 / IfcSite</div></div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="kpi-card"><div class="kpi-title">Georreferenciación</div>'
+            f'<div class="kpi-value">{est_geo_kpi}</div>'
+            '<div class="kpi-sub">ETRS89 / IfcSite</div></div>',
+            unsafe_allow_html=True
+        )
     with k6:
-        st.markdown(f'<div class="kpi-card"><div class="kpi-title">Peso Consolidado</div><div class="kpi-value">{round(peso_total, 1)} MB</div><div class="kpi-sub">{n_proxys:,} Proxies</div></div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="kpi-card"><div class="kpi-title">Peso Consolidado</div>'
+            f'<div class="kpi-value">{round(peso_total, 1)} MB</div>'
+            f'<div class="kpi-sub">{n_proxys:,} Proxies</div></div>',
+            unsafe_allow_html=True
+        )
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -1552,7 +1899,10 @@ with tab12:
         "Archivo_Origen": df_original["Archivo_Origen"].to_numpy()[mask_arr],
         "vac_count": s_vac_arr[mask_arr],
         "pres_count": s_pres_arr[mask_arr],
-        "es_proxy": (df_original["Clase_IFC"].to_numpy()[mask_arr] == "IfcBuildingElementProxy")
+        "es_proxy": (
+            df_original["Clase_IFC"].to_numpy()[mask_arr]
+            == "IfcBuildingElementProxy"
+        )
     })
     grp_mod_exec = df_mod_stats.groupby("Archivo_Origen").agg(
         Elementos=("vac_count", "count"),
@@ -1566,9 +1916,12 @@ with tab12:
         grp_mod_exec["Suma_Celdas_Llenas"] + grp_mod_exec["Suma_Celdas_Vacias"]
     ).replace(0, 1)
     grp_mod_exec["% Cumplimiento BEP"] = (
-        (grp_mod_exec["Suma_Celdas_Llenas"] / grp_mod_exec["Total_Celdas_Modelo"]) * 100
+        (grp_mod_exec["Suma_Celdas_Llenas"] / grp_mod_exec["Total_Celdas_Modelo"])
+        * 100
     ).round(1)
-    grp_mod_exec["% Vacíos"] = (100.0 - grp_mod_exec["% Cumplimiento BEP"]).round(1)
+    grp_mod_exec["% Vacíos"] = (
+        100.0 - grp_mod_exec["% Cumplimiento BEP"]
+    ).round(1)
     grp_mod_exec["Naming BEP"] = grp_mod_exec["Archivo_Origen"].apply(
         lambda a: "✅ OK" if "✅" in diagnosticar_nombre_bep(a) else "❌ Error"
     )
@@ -1582,13 +1935,19 @@ with tab12:
             return "🟡 CON OBSERVACIONES"
         return "🔴 REQUIERE CORRECCIÓN"
 
-    grp_mod_exec["Dictamen Técnico"] = grp_mod_exec.apply(dictamen_modelo, axis=1)
+    grp_mod_exec["Dictamen Técnico"] = grp_mod_exec.apply(
+        dictamen_modelo, axis=1
+    )
 
     col_g1, col_g2 = st.columns([1.1, 1.9])
     with col_g1:
         df_donut = pd.DataFrame({
-            "Estado de Celdas BEP": ["Con Dato Real", "Comodín BEP (-)", "Vacíos (Incumplimiento)"],
-            "Cantidad": [total_celdas_datos, total_celdas_comodin, total_celdas_vacias]
+            "Estado de Celdas BEP": [
+                "Con Dato Real", "Comodín BEP (-)", "Vacíos (Incumplimiento)"
+            ],
+            "Cantidad": [
+                total_celdas_datos, total_celdas_comodin, total_celdas_vacias
+            ]
         })
         fig_donut = px.pie(
             df_donut,
@@ -1603,31 +1962,52 @@ with tab12:
             },
             title="Balance Global de Celdas Auditadas (Navisworks)"
         )
-        fig_donut.update_traces(textposition="inside", textinfo="percent+label")
+        fig_donut.update_traces(
+            textposition="inside", textinfo="percent+label"
+        )
         st.plotly_chart(fig_donut, use_container_width=True)
 
     with col_g2:
-        df_rank_mod = grp_mod_exec.sort_values("% Cumplimiento BEP", ascending=True)
+        df_rank_mod = grp_mod_exec.sort_values(
+            "% Cumplimiento BEP", ascending=True
+        )
         fig_rank = px.bar(
             df_rank_mod,
             y="Archivo_Origen",
             x=["% Cumplimiento BEP", "% Vacíos"],
             orientation="h",
-            title="Índice de Madurez y Cumplimiento Real en Navisworks por Modelo IFC (%)",
-            color_discrete_map={"% Cumplimiento BEP": "#10b981", "% Vacíos": "#ef4444"},
+            title="Índice de Cumplimiento Real en Navisworks por Modelo (%)",
+            color_discrete_map={
+                "% Cumplimiento BEP": "#10b981", "% Vacíos": "#ef4444"
+            },
             text_auto=".1f"
         )
-        fig_rank.update_layout(barmode="stack", xaxis_title="% de Parámetros en Navisworks", yaxis_title="Modelo IFC")
+        fig_rank.update_layout(
+            barmode="stack",
+            xaxis_title="% de Parámetros en Navisworks",
+            yaxis_title="Modelo IFC"
+        )
         st.plotly_chart(fig_rank, use_container_width=True)
 
     col_g3, col_g4 = st.columns(2)
     with col_g3:
-        df_res_vacios["Codigo_Grupo"] = df_res_vacios["Parámetro Oficial APV"].apply(
-            lambda x: x.split("-")[0] if "-" in x.split("_")[0] else x.split("_")[0]
+        df_res_vacios["Codigo_Grupo"] = (
+            df_res_vacios["Parámetro Oficial APV"].apply(
+                lambda x: (
+                    x.split("-")[0]
+                    if "-" in x.split("_")[0] else x.split("_")[0]
+                )
+            )
         )
-        df_res_vacios["Nombre_Bloque_BEP"] = df_res_vacios["Codigo_Grupo"].map(NOMBRES_GRUPOS_BEP).fillna("Otros")
-        grp_bloques = df_res_vacios.groupby("Nombre_Bloque_BEP", as_index=False)["% Cumplimiento (Dato + '-')"].mean()
-        grp_bloques["% Cumplimiento Medio"] = grp_bloques["% Cumplimiento (Dato + '-')"].round(1)
+        df_res_vacios["Nombre_Bloque_BEP"] = (
+            df_res_vacios["Codigo_Grupo"].map(NOMBRES_GRUPOS_BEP).fillna("Otros")
+        )
+        grp_bloques = df_res_vacios.groupby(
+            "Nombre_Bloque_BEP", as_index=False
+        )["% Cumplimiento (Dato + '-')"].mean()
+        grp_bloques["% Cumplimiento Medio"] = (
+            grp_bloques["% Cumplimiento (Dato + '-')"].round(1)
+        )
 
         fig_bloques = px.bar(
             grp_bloques.sort_values("% Cumplimiento Medio", ascending=True),
@@ -1643,7 +2023,11 @@ with tab12:
         st.plotly_chart(fig_bloques, use_container_width=True)
 
     with col_g4:
-        df_top_crit = df_res_vacios.sort_values("Vacíos (Error)", ascending=False).head(12).sort_values("Vacíos (Error)", ascending=True)
+        df_top_crit = (
+            df_res_vacios.sort_values("Vacíos (Error)", ascending=False)
+            .head(12)
+            .sort_values("Vacíos (Error)", ascending=True)
+        )
         fig_pareto = px.bar(
             df_top_crit,
             x="Vacíos (Error)",
@@ -1662,124 +2046,130 @@ with tab12:
         "Elem_Con_Vacios", "Proxies", "% Cumplimiento BEP"
     ]
     st.dataframe(
-        grp_mod_exec[cols_matriz_exec].sort_values("% Cumplimiento BEP", ascending=False),
+        grp_mod_exec[cols_matriz_exec].sort_values(
+            "% Cumplimiento BEP", ascending=False
+        ),
         use_container_width=True,
         hide_index=True
     )
 
     st.markdown("---")
-    st.markdown("#### 🚀 Centro de Descarga de Informe Ejecutivo con Hipervínculos (PDF / HTML / Excel)")
+    st.markdown(
+        "#### 🚀 Centro de Descarga de Informe Ejecutivo "
+        "(PDF / HTML / Excel)"
+    )
 
     filas_html_modelos = "".join([
-        f"<tr><td>{r['Archivo_Origen']}</td><td><b>{r['Dictamen Técnico']}</b></td>"
-        f"<td>{r['Naming BEP']}</td><td>{r['Elementos']:,}</td><td>{r['Elem_Con_Vacios']:,}</td>"
-        f"<td>{int(r['Proxies']):,}</td><td><b>{r['% Cumplimiento BEP']}%</b></td></tr>"
-        for _, r in grp_mod_exec.sort_values("% Cumplimiento BEP", ascending=False).iterrows()
+        f"<tr><td>{r['Archivo_Origen']}</td>"
+        f"<td><b>{r['Dictamen Técnico']}</b></td>"
+        f"<td>{r['Naming BEP']}</td><td>{r['Elementos']:,}</td>"
+        f"<td>{r['Elem_Con_Vacios']:,}</td><td>{int(r['Proxies']):,}</td>"
+        f"<td><b>{r['% Cumplimiento BEP']}%</b></td></tr>"
+        for _, r in grp_mod_exec.sort_values(
+            "% Cumplimiento BEP", ascending=False
+        ).iterrows()
     ])
     filas_html_bloques = "".join([
-        f"<tr><td>{r['Nombre_Bloque_BEP']}</td><td><b>{r['% Cumplimiento Medio']}%</b></td></tr>"
+        f"<tr><td>{r['Nombre_Bloque_BEP']}</td>"
+        f"<td><b>{r['% Cumplimiento Medio']}%</b></td></tr>"
         for _, r in grp_bloques.sort_values("Nombre_Bloque_BEP").iterrows()
     ])
     filas_html_top_vacios = "".join([
-        f"<tr><td>{r['Parámetro Oficial APV']}</td><td>{r['Estado Auditoría']}</td>"
-        f"<td>{r['Con Dato Real']:,}</td><td>{r['Con Comodín (-) Válido']:,}</td>"
-        f"<td><b>{r['Vacíos (Error)']:,}</b></td><td><b>{r['% Cumplimiento (Dato + \'-\')']}%</b></td></tr>"
-        for _, r in df_res_vacios.sort_values("Vacíos (Error)", ascending=False).head(25).iterrows()
+        f"<tr><td>{r['Parámetro Oficial APV']}</td>"
+        f"<td>{r['Estado Auditoría']}</td>"
+        f"<td>{r['Con Dato Real']:,}</td>"
+        f"<td>{r['Con Comodín (-) Válido']:,}</td>"
+        f"<td><b>{r['Vacíos (Error)']:,}</b></td>"
+        f"<td><b>{r['% Cumplimiento (Dato + \'-\')']}%</b></td></tr>"
+        for _, r in df_res_vacios.sort_values(
+            "Vacíos (Error)", ascending=False
+        ).head(25).iterrows()
     ])
 
-    html_ejecutivo = f"""<!DOCTYPE html>
-<html lang="es">
-<head>
-<meta charset="UTF-8">
-<title>Informe Ejecutivo Auditoría BIM - APV</title>
-<style>
-    body {{ font-family: 'Segoe UI', Roboto, Arial, sans-serif; margin: 32px; color: #1e293b; background: #f8fafc; }}
-    .header {{ background: #0f172a; color: white; padding: 24px 32px; border-radius: 12px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }}
-    .nav {{ background: #e2e8f0; padding: 12px 20px; border-radius: 8px; margin-bottom: 24px; display: flex; gap: 18px; flex-wrap: wrap; }}
-    .nav a {{ color: #0284c7; font-weight: 600; text-decoration: none; }}
-    .nav a:hover {{ text-decoration: underline; }}
-    .btn-print {{ background: #0284c7; color: white; border: none; padding: 10px 18px; border-radius: 6px; cursor: pointer; font-weight: bold; }}
-    .kpis {{ display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 24px; }}
-    .kpi {{ background: white; border: 1px solid #cbd5e1; border-radius: 8px; padding: 14px; text-align: center; }}
-    .kpi h4 {{ margin: 0; font-size: 12px; color: #64748b; text-transform: uppercase; }}
-    .kpi p {{ margin: 6px 0 0 0; font-size: 22px; font-weight: 700; color: #0f172a; }}
-    table {{ width: 100%; border-collapse: collapse; background: white; margin-bottom: 28px; font-size: 13px; }}
-    th, td {{ border: 1px solid #cbd5e1; padding: 8px 12px; text-align: left; }}
-    th {{ background: #0f172a; color: white; }}
-    tr:nth-child(even) {{ background: #f1f5f9; }}
-    h2 {{ color: #0f172a; border-bottom: 2px solid #0284c7; padding-bottom: 6px; margin-top: 28px; }}
-    @media print {{ .no-print {{ display: none !important; }} body {{ background: white; margin: 10px; }} }}
-</style>
-</head>
-<body>
-    <div class="header">
-        <div>
-            <h1 style="margin:0; font-size:24px;">📋 Acta Ejecutiva de Auditoría BIM & Cumplimiento BEP</h1>
-            <p style="margin:4px 0 0 0; color:#94a3b8;">Autoridad Portuaria de Valencia (APV) · Contrato N035 · Emitido: {fecha_actual_str}</p>
-        </div>
-        <button class="btn-print no-print" onclick="window.print()">🖨️ Imprimir / Guardar en PDF</button>
-    </div>
-
-    <div class="nav no-print">
-        <span><b>🔗 Índice Rápido con Hipervínculos:</b></span>
-        <a href="#seccion-kpis">1. KPIs Ejecutivos</a>
-        <a href="#seccion-matriz">2. Matriz por Modelo IFC</a>
-        <a href="#seccion-bloques">3. Cumplimiento por Bloques BEP</a>
-        <a href="#seccion-criticos">4. Top Parámetros Críticos</a>
-        <a href="https://ausep2.streamlit.app/" target="_blank">🌐 Abrir Dashboard Interactivo en Vivo (APV)</a>
-    </div>
-
-    <h2 id="seccion-kpis">1. Indicadores Clave de Rendimiento (KPIs)</h2>
-    <div class="kpis">
-        <div class="kpi"><h4>Modelos Auditados</h4><p>{len(sel_archivos)} IFCs</p></div>
-        <div class="kpi"><h4>Elementos Reales</h4><p>{total_el:,}</p></div>
-        <div class="kpi"><h4>Cumplimiento BEP</h4><p>{pct_cumplimiento_global}%</p></div>
-        <div class="kpi"><h4>Naming Anejo 02</h4><p>{pct_naming_ok}%</p></div>
-        <div class="kpi"><h4>Georreferenciación</h4><p>{"OK" if geo_consistente else "Revisar"}</p></div>
-        <div class="kpi"><h4>Peso Consolidado</h4><p>{round(peso_total, 2)} MB</p></div>
-    </div>
-
-    <h2 id="seccion-matriz">2. Matriz Ejecutiva de Calidad por Modelo IFC</h2>
-    <table>
-        <thead>
-            <tr>
-                <th>Archivo IFC</th><th>Dictamen Técnico</th><th>Naming BEP</th>
-                <th>Elementos Auditados</th><th>Elementos con Vacíos</th><th>Proxies</th><th>% Cumplimiento BEP</th>
-            </tr>
-        </thead>
-        <tbody>{filas_html_modelos}</tbody>
-    </table>
-
-    <h2 id="seccion-bloques">3. Cumplimiento por Dimensiones y Bloques del BEP APV</h2>
-    <table>
-        <thead><tr><th>Bloque / Dimensión del BEP</th><th>% Cumplimiento Medio</th></tr></thead>
-        <tbody>{filas_html_bloques}</tbody>
-    </table>
-
-    <h2 id="seccion-criticos">4. Top 25 Parámetros Oficiales APV con Mayor Número de Vacíos</h2>
-    <table>
-        <thead>
-            <tr>
-                <th>Parámetro Oficial APV</th><th>Estado</th><th>Con Dato Real</th>
-                <th>Con Comodín (-)</th><th>Vacíos (Error)</th><th>% Cumplimiento</th>
-            </tr>
-        </thead>
-        <tbody>{filas_html_top_vacios}</tbody>
-    </table>
-</body>
-</html>"""
+    est_geo_txt = "OK" if geo_consistente else "Revisar"
+    html_lineas = [
+        "<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'>",
+        "<title>Informe Ejecutivo Auditoría BIM - APV</title>",
+        "<style>",
+        "body { font-family: 'Segoe UI', Arial, sans-serif; margin: 32px; "
+        "color: #1e293b; background: #f8fafc; }",
+        ".header { background: #0f172a; color: white; padding: 24px 32px; "
+        "border-radius: 12px; margin-bottom: 20px; display: flex; "
+        "justify-content: space-between; align-items: center; }",
+        ".nav { background: #e2e8f0; padding: 12px 20px; border-radius: 8px; "
+        "margin-bottom: 24px; display: flex; gap: 18px; flex-wrap: wrap; }",
+        ".nav a { color: #0284c7; font-weight: 600; text-decoration: none; }",
+        ".btn-print { background: #0284c7; color: white; border: none; "
+        "padding: 10px 18px; border-radius: 6px; cursor: pointer; "
+        "font-weight: bold; }",
+        ".kpis { display: grid; grid-template-columns: repeat(6, 1fr); "
+        "gap: 12px; margin-bottom: 24px; }",
+        ".kpi { background: white; border: 1px solid #cbd5e1; "
+        "border-radius: 8px; padding: 14px; text-align: center; }",
+        ".kpi h4 { margin: 0; font-size: 12px; color: #64748b; }",
+        ".kpi p { margin: 6px 0 0 0; font-size: 22px; font-weight: 700; }",
+        "table { width: 100%; border-collapse: collapse; background: white; "
+        "margin-bottom: 28px; font-size: 13px; }",
+        "th, td { border: 1px solid #cbd5e1; padding: 8px 12px; "
+        "text-align: left; }",
+        "th { background: #0f172a; color: white; }",
+        "tr:nth-child(even) { background: #f1f5f9; }",
+        "h2 { color: #0f172a; border-bottom: 2px solid #0284c7; "
+        "padding-bottom: 6px; margin-top: 28px; }",
+        "@media print { .no-print { display: none !important; } }",
+        "</style></head><body>",
+        "<div class='header'><div>",
+        "<h1 style='margin:0; font-size:24px;'>"
+        "📋 Acta Ejecutiva de Auditoría BIM & Cumplimiento BEP</h1>",
+        f"<p style='margin:4px 0 0 0; color:#94a3b8;'>"
+        f"Autoridad Portuaria de Valencia (APV) · Emitido: {fecha_actual_str}</p>",
+        "</div><button class='btn-print no-print' onclick='window.print()'>"
+        "🖨️ Imprimir / Guardar en PDF</button></div>",
+        "<div class='nav no-print'><b>🔗 Índice Rápido:</b>",
+        "<a href='#seccion-kpis'>1. KPIs Ejecutivos</a>",
+        "<a href='#seccion-matriz'>2. Matriz por Modelo IFC</a>",
+        "<a href='#seccion-bloques'>3. Cumplimiento por Bloques BEP</a>",
+        "<a href='#seccion-criticos'>4. Top Parámetros Críticos</a>",
+        "<a href='https://ausep2.streamlit.app/' target='_blank'>"
+        "🌐 Abrir Dashboard Interactivo en Vivo</a></div>",
+        "<h2 id='seccion-kpis'>1. Indicadores Clave (KPIs)</h2>",
+        "<div class='kpis'>",
+        f"<div class='kpi'><h4>Modelos</h4><p>{len(sel_archivos)} IFCs</p></div>",
+        f"<div class='kpi'><h4>Elementos</h4><p>{total_el:,}</p></div>",
+        f"<div class='kpi'><h4>Cumplimiento</h4><p>{pct_cumplimiento_global}%</p></div>",
+        f"<div class='kpi'><h4>Naming BEP</h4><p>{pct_naming_ok}%</p></div>",
+        f"<div class='kpi'><h4>Georref.</h4><p>{est_geo_txt}</p></div>",
+        f"<div class='kpi'><h4>Peso Total</h4><p>{round(peso_total, 2)} MB</p></div>",
+        "</div>",
+        "<h2 id='seccion-matriz'>2. Matriz de Calidad por Modelo IFC</h2>",
+        "<table><thead><tr><th>Archivo IFC</th><th>Dictamen</th>"
+        "<th>Naming BEP</th><th>Elementos</th><th>Con Vacíos</th>"
+        "<th>Proxies</th><th>% Cumplimiento</th></tr></thead>",
+        f"<tbody>{filas_html_modelos}</tbody></table>",
+        "<h2 id='seccion-bloques'>3. Cumplimiento por Bloques BEP</h2>",
+        "<table><thead><tr><th>Bloque BEP</th><th>% Cumplimiento Medio</th>"
+        f"</tr></thead><tbody>{filas_html_bloques}</tbody></table>",
+        "<h2 id='seccion-criticos'>4. Top 25 Parámetros con Vacíos</h2>",
+        "<table><thead><tr><th>Parámetro Oficial APV</th><th>Estado</th>"
+        "<th>Con Dato</th><th>Comodín (-)</th><th>Vacíos</th>"
+        f"<th>% Cumplimiento</th></tr></thead><tbody>{filas_html_top_vacios}"
+        "</tbody></table></body></html>"
+    ]
+    html_ejecutivo = "\n".join(html_lineas)
 
     col_exp1, col_exp2, col_exp3 = st.columns(3)
     with col_exp1:
         st.download_button(
-            label="📄 Descargar Informe Ejecutivo con Hipervínculos (HTML / Imprimible a PDF)",
+            label="📄 Descargar Informe Ejecutivo (HTML / Imprimible a PDF)",
             data=html_ejecutivo.encode("utf-8"),
             file_name="Informe_Ejecutivo_Auditoria_BIM_APV.html",
             mime="text/html",
             use_container_width=True
         )
     with col_exp2:
-        csv_matriz = grp_mod_exec[cols_matriz_exec].to_csv(index=False).encode("utf-8")
+        csv_matriz = (
+            grp_mod_exec[cols_matriz_exec].to_csv(index=False).encode("utf-8")
+        )
         st.download_button(
             label="📊 Descargar Matriz Ejecutiva por Modelo (CSV / Excel)",
             data=csv_matriz,
@@ -1790,25 +2180,32 @@ with tab12:
     with col_exp3:
         csv_vac_res = df_res_vacios.to_csv(index=False).encode("utf-8")
         st.download_button(
-            label="📥 Descargar Resumen de los Parámetros APV (CSV / Excel)",
+            label="📥 Descargar Resumen de Parámetros APV (CSV / Excel)",
             data=csv_vac_res,
             file_name="Resumen_Parametros_BEP_APV.csv",
             mime="text/csv",
             use_container_width=True
         )
 
-# --- PESTAÑA 13 (CONTROL DE AVANCE MENSUAL Y NO-REGRESIÓN DE ENTREGAS) ---
+# --- PESTAÑA 13 ---
 with tab13:
-    st.subheader("📈 13. Control de Avance Mensual y Regla de No-Regresión de Modelos")
+    st.subheader(
+        "📈 13. Control de Avance Mensual y Regla de No-Regresión"
+    )
     st.markdown(
-        "**Regla de Negocio APV:** *El número de modelos IFC entregados jamás puede ser inferior al del mes anterior; "
-        "siempre debe mantenerse igual o incrementarse conforme avanza la obra.*"
+        "**Regla de Negocio APV:** *El número de modelos IFC entregados "
+        "jamás puede ser inferior al del mes anterior; siempre debe "
+        "mantenerse igual o incrementarse conforme avanza la obra.*"
     )
 
     col_av1, col_av2, col_av3 = st.columns(3)
     diferencia_modelos = len(sel_archivos) - umbral_mes_anterior
     col_av1.metric("Modelos Entrega Mes Anterior (Base)", umbral_mes_anterior)
-    col_av2.metric("Modelos Entrega Actual", len(sel_archivos), delta=f"{diferencia_modelos:+d} modelos")
+    col_av2.metric(
+        "Modelos Entrega Actual",
+        len(sel_archivos),
+        delta=f"{diferencia_modelos:+d} modelos"
+    )
     col_av3.metric(
         "Estado Regla de Avance",
         "✅ CUMPLE" if diferencia_modelos >= 0 else "🚨 INCUMPLE"
@@ -1816,21 +2213,32 @@ with tab13:
 
     desglose_rev = []
     for arch in sel_archivos:
-        partes = str(arch)[:-4].split("_") if str(arch).lower().endswith(".ifc") else str(arch).split("_")
+        partes = (
+            str(arch)[:-4].split("_")
+            if str(arch).lower().endswith(".ifc")
+            else str(arch).split("_")
+        )
         disc_arch = partes[4].upper() if len(partes) > 4 else "SIN_DISC"
         rev_arch = partes[6].upper() if len(partes) > 6 else "SIN_REV"
         desglose_rev.append({
             "Archivo IFC": arch,
             "Disciplina (Bloque 5)": disc_arch,
             "Revisión Actual (Bloque 7)": rev_arch,
-            "Elementos Auditados": int((df_original["Archivo_Origen"] == arch).sum())
+            "Elementos Auditados": int(
+                (df_original["Archivo_Origen"] == arch).sum()
+            )
         })
     df_rev = pd.DataFrame(desglose_rev)
 
     c_rev1, c_rev2 = st.columns(2)
     with c_rev1:
+        df_disc_cnt = (
+            df_rev.groupby("Disciplina (Bloque 5)")
+            .size()
+            .reset_index(name="Cantidad Modelos")
+        )
         fig_disc = px.bar(
-            df_rev.groupby("Disciplina (Bloque 5)").size().reset_index(name="Cantidad Modelos"),
+            df_disc_cnt,
             x="Disciplina (Bloque 5)",
             y="Cantidad Modelos",
             text="Cantidad Modelos",
@@ -1846,17 +2254,25 @@ with tab13:
         )
         st.plotly_chart(fig_revs, use_container_width=True)
 
-    st.markdown("#### 🔍 Comparador Opcional de Listado de Modelos vs Mes Anterior")
+    st.markdown(
+        "#### 🔍 Comparador Opcional de Listado de Modelos vs Mes Anterior"
+    )
     texto_modelos_mes_ant = st.text_area(
-        "Si deseas comprobar qué archivos específicos entraron nuevos o cuáles faltan respecto al mes pasado, pega aquí los nombres de los IFC del mes anterior (uno por línea):",
-        placeholder="V_N035_OB_SEG_MOD_EaPavBtMC12_01D.ifc\nV_N035_OB_MOD_EST_DmBlqGFarDN2_01D.ifc",
+        "Pega aquí los nombres de los IFC del mes anterior (uno por línea):",
+        placeholder="V_N035_OB_SEG_MOD_EaPavBtMC12_01D.ifc",
         height=120
     )
     if texto_modelos_mes_ant.strip():
-        lista_ant = [x.strip() for x in texto_modelos_mes_ant.splitlines() if x.strip()]
+        lista_ant = [
+            x.strip()
+            for x in texto_modelos_mes_ant.splitlines() if x.strip()
+        ]
 
         def raiz_modelo(nombre):
-            b = str(nombre)[:-4] if str(nombre).lower().endswith(".ifc") else str(nombre)
+            b = (
+                str(nombre)[:-4]
+                if str(nombre).lower().endswith(".ifc") else str(nombre)
+            )
             p = b.split("_")
             return "_".join(p[:6]).upper() if len(p) >= 6 else b.upper()
 
@@ -1867,12 +2283,129 @@ with tab13:
         nuevos = [raices_act[k] for k in raices_act if k not in raices_ant]
 
         if faltantes:
-            st.error(f"🚨 **Faltan {len(faltantes)} modelos que estaban el mes anterior:** {', '.join(faltantes)}")
+            st.error(
+                f"🚨 **Faltan {len(faltantes)} modelos del mes anterior:** "
+                f"{', '.join(faltantes)}"
+            )
         else:
-            st.success("✅ Todos los modelos del listado anterior están presentes en la entrega actual.")
+            st.success(
+                "✅ Todos los modelos del listado anterior están presentes."
+            )
         if nuevos:
-            st.info(f"🆕 **Modelos nuevos incorporados en esta entrega ({len(nuevos)}):** {', '.join(nuevos)}")
+            st.info(
+                f"🆕 **Modelos nuevos incorporados ({len(nuevos)}):** "
+                f"{', '.join(nuevos)}"
+            )
 
-# --- PESTAÑA 14 (AUDITORÍA CRUZADA DE COHERENCIA 4D / 5D / 6D) ---
+# --- PESTAÑA 14 ---
 with tab14:
-    st.subheader("🏗️ 14. Auditoría de Coherencia Cruzada 4D (Planificación), 5D (Mediciones) y
+    st.subheader(
+        "🏗️ 14. Auditoría de Coherencia Cruzada 4D, 5D y 6D/GIS"
+    )
+    st.markdown(
+        "Verifica que no existan incongruencias lógicas entre "
+        "parámetros del mismo bloque (ej. elementos con **Medición** "
+        "numérica pero sin **Unidad de Obra** o **Tipo de Medición**)."
+    )
+
+    reglas_coherencia = []
+
+    cols_5d = [
+        "02_04_01_APV_MEDICION",
+        "02_05_01_APV_UNIDAD-OBRA",
+        "02_06_01_APV_TIPO-MED"
+    ]
+    if all(c in df_original.columns for c in cols_5d):
+        tiene_med = (
+            (~mascara_vacio_rapida(df_original, "02_04_01_APV_MEDICION"))
+            & (~mascara_comodin_rapida(df_original, "02_04_01_APV_MEDICION"))
+        )
+        falta_uo_o_tmed = (
+            mascara_vacio_efectiva(df_original, "02_05_01_APV_UNIDAD-OBRA")
+            | mascara_vacio_efectiva(df_original, "02_06_01_APV_TIPO-MED")
+        )
+        m_inco_5d = mask_arr & tiene_med & falta_uo_o_tmed
+        reglas_coherencia.append(
+            ("5D - Con Medición pero sin Unidad de Obra o Tipo-Med", m_inco_5d)
+        )
+
+    cols_4d = [
+        "04_08_APV_PORCENTAJE-EJECUTADO",
+        "04_01_APV_CÓDIGO-TAREA",
+        "04_02_APV_NOMBRE-TAREA"
+    ]
+    if all(c in df_original.columns for c in cols_4d):
+        tiene_pct = (
+            (~mascara_vacio_rapida(df_original, "04_08_APV_PORCENTAJE-EJECUTADO"))
+            & (~mascara_comodin_rapida(df_original, "04_08_APV_PORCENTAJE-EJECUTADO"))
+        )
+        falta_tarea = (
+            mascara_vacio_efectiva(df_original, "04_01_APV_CÓDIGO-TAREA")
+            | mascara_vacio_efectiva(df_original, "04_02_APV_NOMBRE-TAREA")
+        )
+        m_inco_4d = mask_arr & tiene_pct & falta_tarea
+        reglas_coherencia.append(
+            ("4D - Con % Ejecutado pero sin Código/Nombre de Tarea", m_inco_4d)
+        )
+
+    cols_6d = [
+        "08_01_APV_PLAN-MANTENIMIENTO",
+        "08_03_APV_COD-MANTENIMIENTO"
+    ]
+    if all(c in df_original.columns for c in cols_6d):
+        tiene_plan = (
+            (~mascara_vacio_rapida(df_original, "08_01_APV_PLAN-MANTENIMIENTO"))
+            & (~mascara_comodin_rapida(df_original, "08_01_APV_PLAN-MANTENIMIENTO"))
+        )
+        falta_cod_mant = mascara_vacio_efectiva(
+            df_original, "08_03_APV_COD-MANTENIMIENTO"
+        )
+        m_inco_6d = mask_arr & tiene_plan & falta_cod_mant
+        reglas_coherencia.append(
+            ("6D - Con Plan de Mantenimiento pero sin Código", m_inco_6d)
+        )
+
+    res_coherencia = [
+        {
+            "Regla de Coherencia BEP": nombre_r,
+            "Elementos Incoherentes": int(m_r.sum()),
+            "Estado": (
+                "✅ OK" if int(m_r.sum()) == 0
+                else f"⚠️ Revisar ({int(m_r.sum()):,})"
+            )
+        }
+        for nombre_r, m_r in reglas_coherencia
+    ]
+    st.dataframe(
+        pd.DataFrame(res_coherencia),
+        use_container_width=True,
+        hide_index=True
+    )
+
+    if reglas_coherencia:
+        regla_sel_14 = st.selectbox(
+            "Inspeccionar elementos que incumplen la regla:",
+            options=[r[0] for r in reglas_coherencia],
+            key="t14_regla_sel"
+        )
+        mask_sel_14 = dict(reglas_coherencia)[regla_sel_14]
+        idx_14 = np.flatnonzero(mask_sel_14)
+        if len(idx_14) > 0:
+            cols_14 = [
+                c for c in [
+                    "Archivo_Origen", col_id_nativo, "GlobalId", "Clase_IFC",
+                    "02_04_01_APV_MEDICION", "02_05_01_APV_UNIDAD-OBRA",
+                    "02_06_01_APV_TIPO-MED", "04_01_APV_CÓDIGO-TAREA",
+                    "04_02_APV_NOMBRE-TAREA", "04_08_APV_PORCENTAJE-EJECUTADO"
+                ] if c in df_original.columns
+            ]
+            st.dataframe(
+                df_original[cols_14].iloc[idx_14[:5000]],
+                use_container_width=True
+            )
+        else:
+            st.success(
+                "✅ Cero incoherencias en esta regla para los modelos seleccionados."
+            )
+
+print("[DIAG FIN] Dashboard de 14 pestañas renderizado con éxito", flush=True)
