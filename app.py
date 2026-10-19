@@ -845,8 +845,14 @@ def inicializar_motor_apv(ruta, tamano_archivo, mtime_ns):
     t0 = time.perf_counter()
     print("[DIAG 1] Leyendo archivo Parquet...", flush=True)
     df_raw = pd.read_parquet(ruta, engine="pyarrow")
+    # Algunos Parquet exportados pueden contener etiquetas repetidas (por ejemplo,
+    # dos columnas GlobalId). Se fusionan por fila antes del mapeo APV.
     df_raw = coalescer_columnas_duplicadas(df_raw)
     df_raw, mapa_parametros = resolver_parametros_apv(df_raw)
+    # Segunda barrera defensiva: las fases siguientes deben trabajar con nombres únicos.
+    df_raw = coalescer_columnas_duplicadas(df_raw)
+    if df_raw.columns.duplicated().any():
+        raise ValueError("No se pudieron normalizar los nombres duplicados de columnas del Parquet.")
 
     if "Archivo_Origen" not in df_raw.columns:
         raise ValueError("El Parquet no contiene la columna obligatoria 'Archivo_Origen'.")
@@ -2841,6 +2847,10 @@ with tab11:
         "estado de un archivo `.ifc` específico, proxies, pesos o reglas del BEP**."
 
     )
+    st.caption(
+        "El asistente actual responde usando reglas y métricas calculadas desde esta auditoría; "
+        "no llama todavía a un modelo generativo externo ni requiere una API key."
+    )
 
 
 
@@ -4009,7 +4019,11 @@ with tab16:
         "independientemente del filtro de unificación de duplicados. Los repetidos se listan para revisión; "
         "no se eliminan automáticamente porque algunos pueden tener una explicación de origen."
     )
-    df_ids_base = df_original.loc[df_original["Archivo_Origen"].isin(sel_archivos)].copy()
+    # Barrera defensiva para archivos históricos/cachés creados con una versión previa.
+    # La fusión conserva el primer valor no vacío entre columnas con la misma etiqueta.
+    df_ids_unicas = coalescer_columnas_duplicadas(df_original)
+    df_ids_unicas = df_ids_unicas.loc[:, ~df_ids_unicas.columns.duplicated(keep="first")].copy()
+    df_ids_base = df_ids_unicas.loc[df_ids_unicas["Archivo_Origen"].isin(sel_archivos)].copy()
     campo_id_dup = st.radio(
         "Identificador que deseas comprobar:",
         options=[c for c in ["GlobalId", "ID_Elemento"] if c in df_ids_base.columns],
@@ -4036,16 +4050,38 @@ with tab16:
         d3.metric("Registros implicados en duplicados", f"{n_filas_duplicadas:,}")
         st.caption(f"Valores identificadores repetidos por modelo: {n_valores_duplicados:,}.")
         if not df_repetidos_id.empty:
-            cols_dup_show = [c for c in ["Archivo_Origen", campo_id_dup, "GlobalId", "ID_Elemento", "Clase_IFC", "Nombre"] if c in df_repetidos_id.columns]
+            # Asegurar nombres únicos también en la tabla derivada. Si el ID elegido
+            # ya es GlobalId, no añadir la columna por segunda vez.
+            df_repetidos_id = coalescer_columnas_duplicadas(df_repetidos_id)
+            df_repetidos_id = df_repetidos_id.loc[:, ~df_repetidos_id.columns.duplicated(keep="first")].copy()
+            candidatos = ["Archivo_Origen", campo_id_dup, "GlobalId", "ID_Elemento", "Clase_IFC", "Nombre"]
+            cols_dup_show = []
+            for nombre_col in candidatos:
+                if nombre_col in df_repetidos_id.columns and nombre_col not in cols_dup_show:
+                    cols_dup_show.append(nombre_col)
+            df_repetidos_mostrar = df_repetidos_id.loc[:, cols_dup_show].copy()
+            # Defensa final: sort_values falla si la lista de columnas o las etiquetas
+            # están duplicadas; esta lista se mantiene estrictamente única.
+            columnas_orden = []
+            for nombre_col in ["Archivo_Origen", campo_id_dup]:
+                if nombre_col in df_repetidos_mostrar.columns and nombre_col not in columnas_orden:
+                    columnas_orden.append(nombre_col)
+            if columnas_orden:
+                try:
+                    df_repetidos_mostrar = df_repetidos_mostrar.sort_values(by=columnas_orden)
+                except (ValueError, KeyError):
+                    # Mostrar el listado sin ordenar es preferible a bloquear toda la app.
+                    pass
+            df_repetidos_mostrar = df_repetidos_mostrar.head(10000)
             st.dataframe(
-                df_repetidos_id[cols_dup_show].sort_values(["Archivo_Origen", campo_id_dup]).head(10000),
+                df_repetidos_mostrar,
                 width="stretch",
                 hide_index=True,
                 height=450
             )
             st.download_button(
                 "⬇️ Descargar identificadores duplicados (CSV)",
-                data=df_repetidos_id[cols_dup_show].to_csv(index=False).encode("utf-8-sig"),
+                data=df_repetidos_mostrar.to_csv(index=False).encode("utf-8-sig"),
                 file_name=f"Duplicados_{campo_id_dup}_APV.csv",
                 mime="text/csv",
                 key="t16_descargar_duplicados"
